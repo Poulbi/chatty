@@ -1,0 +1,274 @@
+// Client for chatty
+
+// TODO:
+// - bug: when having multiple messages and resizing a lot, the output will be in shambles
+// - bug: when resizing afters sending messages over network it crashes
+// - use pointer for add_message
+
+// clang-format off
+#define TB_IMPL
+#include "termbox2.h"
+// clang-format on
+#include "config.h"
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <poll.h>
+#include <stdarg.h>
+#include <sys/socket.h>
+#include <time.h>
+#include <unistd.h>
+
+enum { FD_SERVER = 0,
+       FD_TTY,
+       FD_RESIZE,
+       FD_MAX };
+
+// offset of the input prompt
+int curs_offs_x   = 2;
+int prompt_offs_y = 3;
+
+// filedescriptor for server
+static int serverfd;
+// Input message to be send
+struct message input = {
+    .buf       = {0},
+    .author    = USERNAME,
+    .timestamp = {0},
+    .buf_len   = 0,
+};
+// All messages sent and received in order
+struct message *messages;
+// current amount of messages
+int nmessages = 0;
+// length of messages array
+int messages_len = 2;
+// incremented each time a new message is printed
+int msg_y = 0;
+
+void cleanup()
+{
+    free(messages);
+    if (messages == NULL) {
+        writef("something wrong happened.");
+    }
+    tb_shutdown();
+    if (serverfd)
+        if (close(serverfd))
+            writef("Error while closing server socket. errno: %d\n", errno);
+}
+
+void err_exit(const char *msg)
+{
+    cleanup();
+    writef("%s errno: %d\n", msg, errno);
+    _exit(1);
+}
+
+void screen_welcome()
+{
+    tb_set_cursor(curs_offs_x, global.height - prompt_offs_y);
+    tb_print(0, global.height - prompt_offs_y, 0, 0, ">");
+
+    // if there is not enough space to fit all messages, skip the n first messages of the array.
+    int skip            = 0;
+    int lines_available = global.height - prompt_offs_y - 1; // pad by 1 from prompt
+    if (lines_available - nmessages < 0)
+        skip = nmessages - lines_available;
+    for (msg_y = skip; msg_y < nmessages; msg_y++) {
+        tb_printf(0, msg_y - skip, 0, 0, "%s [%s]: %s", messages[msg_y].timestamp, messages[msg_y].author, messages[msg_y].buf);
+    }
+}
+
+// Append the message to the messages array
+void add_message(struct message msg)
+{
+    int i;
+    for (i = 0; (messages[nmessages].buf[i] = msg.buf[i]); i++)
+        ;
+    messages[nmessages].buf[i]  = 0;
+    messages[nmessages].buf_len = i;
+    for (i = 0; (messages[nmessages].timestamp[i] = msg.timestamp[i]); i++)
+        ;
+    messages[nmessages].timestamp[i] = 0;
+    for (i = 0; (messages[nmessages].author[i] = msg.author[i]); i++)
+        ;
+
+    nmessages++;
+    msg_y++;
+
+    if (nmessages == messages_len) {
+        int new_size = 5;
+        messages     = realloc(messages, new_size * sizeof(struct message));
+        if (messages == NULL)
+            err_exit("Could not reallocate memory for messages.");
+        messages_len += new_size;
+    }
+}
+
+int main(void)
+{
+    // current event
+    struct tb_event ev;
+    // time for a new entered message
+    time_t now;
+    // localtime of new sent message
+    struct tm *ltime;
+
+    int serverfd, ttyfd, resizefd;
+    struct message msg_recv          = {0};
+    const struct sockaddr_in address = {
+        AF_INET,
+        htons(PORT),
+        {0},
+    };
+
+    messages = malloc(messages_len * sizeof(struct message));
+    if (messages == NULL)
+        err_exit("Could not allocate memory for messages.");
+
+    tb_init();
+    bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
+
+    screen_welcome();
+    tb_present();
+
+    tb_get_fds(&ttyfd, &resizefd);
+    serverfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    struct pollfd fds[FD_MAX] = {
+        {serverfd, POLLIN, 0}, // FD_SERVER
+        {   ttyfd, POLLIN, 0}, // FD_TTY
+        {resizefd, POLLIN, 0}, // FD_RESIZE
+    };
+
+    if (connect(serverfd, (struct sockaddr *)&address, sizeof(address)))
+        err_exit("Error while connecting.");
+
+    for (;;) {
+        if (poll(fds, FD_MAX, 50000) == -1) {
+            // check if it was a resize event that interrupted the system call
+            if (errno == EINTR) {
+                tb_peek_event(&ev, 80);
+                if (ev.type != TB_EVENT_RESIZE)
+                    err_exit("Error while polling.");
+                else {
+                    tb_clear();
+                    screen_welcome();
+                }
+            }
+        }
+
+        if (fds[FD_TTY].revents & POLLIN) {
+            tb_poll_event(&ev);
+            switch (ev.key) {
+            // exit
+            case TB_KEY_CTRL_C:
+            case TB_KEY_CTRL_D:
+            case TB_KEY_ESC:
+                goto exit_loop;
+            // remove line till cursor
+            case TB_KEY_CTRL_U:
+                while (global.cursor_x > curs_offs_x) {
+                    global.cursor_x--;
+                    tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
+                }
+                tb_set_cursor(curs_offs_x, global.cursor_y);
+                input.buf_len = 0;
+                break;
+            // send message
+            case TB_KEY_CTRL_M:
+                if (input.buf_len <= 0)
+                    break;
+                while (global.cursor_x > curs_offs_x) {
+                    global.cursor_x--;
+                    tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
+                }
+                tb_set_cursor(curs_offs_x, global.cursor_y);
+
+                // zero terminate
+                input.buf[input.buf_len] = 0;
+
+                // print new message
+                time(&now);
+                ltime = localtime(&now);
+                strftime(input.timestamp, sizeof(input.timestamp), "%H:%M:%S", ltime);
+
+                add_message(input);
+
+                if (send(serverfd, &input, sizeof(input), 0) == -1)
+                    err_exit("Error while sending message.");
+
+                // reset buffer
+                input.buf_len = 0;
+
+                // update the screen
+                // NOTE: kind of wasteful cause we should only display new message
+                tb_clear();
+                screen_welcome();
+
+                break;
+            // remove word
+            case TB_KEY_CTRL_W:
+                // Delete consecutive space
+                while (input.buf[input.buf_len - 1] == ' ' && global.cursor_x > curs_offs_x) {
+                    global.cursor_x--;
+                    input.buf_len--;
+                    tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
+                }
+                // Delete until next non-space
+                while (input.buf[input.buf_len - 1] != ' ' && global.cursor_x > curs_offs_x) {
+                    global.cursor_x--;
+                    input.buf_len--;
+                    tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
+                }
+                input.buf[input.buf_len] = 0;
+                break;
+            }
+
+            // append pressed character to input.buf
+            // TODO: wrap instead
+            if (ev.ch > 0 && input.buf_len < MSG_MAX && input.buf_len < global.width - 3 - 1) {
+                tb_printf(global.cursor_x, global.cursor_y, 0, 0, "%c", ev.ch);
+                global.cursor_x++;
+
+                input.buf[input.buf_len++] = ev.ch;
+            }
+
+        } else if (fds[FD_SERVER].revents & POLLIN) {
+            int nrecv = recv(serverfd, &msg_recv, sizeof(struct message), 0);
+
+            // // TODO: check if bytes are correct
+            // cleanup();
+            // FILE *f = fopen("client_recv.bin", "wb");
+            // fwrite(&msg_recv, sizeof(struct message), 1, f);
+            // fclose(f);
+            //
+            // printf("written %lu bytes to client_recv.bin\n", sizeof(msg_recv));
+            // return 0;
+
+            // Server closes
+            if (nrecv == 0) {
+                break;
+            } else if (nrecv == -1) {
+                err_exit("Error while receiveiving from server.");
+            }
+            add_message(msg_recv);
+            tb_clear();
+            screen_welcome();
+
+        } else if (fds[FD_RESIZE].revents & POLLIN) {
+            tb_poll_event(&ev);
+            if (ev.type == TB_EVENT_RESIZE) {
+                tb_clear();
+                screen_welcome();
+            }
+        }
+
+        tb_present();
+    }
+exit_loop:;
+
+    cleanup();
+    return 0;
+}
