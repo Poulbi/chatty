@@ -9,6 +9,7 @@
 #define TB_IMPL
 #include "termbox2.h"
 // clang-format on
+#include "common.h"
 #include "config.h"
 
 #include <arpa/inet.h>
@@ -32,10 +33,9 @@ int prompt_offs_y = 3;
 static int serverfd;
 // Input message to be send
 struct message input = {
-    .buf       = {0},
     .author    = USERNAME,
     .timestamp = {0},
-    .buf_len   = 0,
+    .len       = 0,
 };
 // All messages sent and received in order
 struct message *messages;
@@ -76,7 +76,7 @@ void screen_welcome()
     if (lines_available - nmessages < 0)
         skip = nmessages - lines_available;
     for (msg_y = skip; msg_y < nmessages; msg_y++) {
-        tb_printf(0, msg_y - skip, 0, 0, "%s [%s]: %s", messages[msg_y].timestamp, messages[msg_y].author, messages[msg_y].buf);
+        tb_printf(0, msg_y - skip, 0, 0, "%s [%s]: %s", messages[msg_y].timestamp, messages[msg_y].author, messages[msg_y].text);
     }
 }
 
@@ -84,10 +84,10 @@ void screen_welcome()
 void add_message(struct message msg)
 {
     int i;
-    for (i = 0; (messages[nmessages].buf[i] = msg.buf[i]); i++)
+    for (i = 0; (messages[nmessages].text[i] = msg.text[i]); i++)
         ;
-    messages[nmessages].buf[i]  = 0;
-    messages[nmessages].buf_len = i;
+    messages[nmessages].text[i] = 0;
+    messages[nmessages].len     = i;
     for (i = 0; (messages[nmessages].timestamp[i] = msg.timestamp[i]); i++)
         ;
     messages[nmessages].timestamp[i] = 0;
@@ -174,11 +174,11 @@ int main(void)
                     tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
                 }
                 tb_set_cursor(curs_offs_x, global.cursor_y);
-                input.buf_len = 0;
+                input.len = 0;
                 break;
             // send message
             case TB_KEY_CTRL_M:
-                if (input.buf_len <= 0)
+                if (input.len <= 0)
                     break;
                 while (global.cursor_x > curs_offs_x) {
                     global.cursor_x--;
@@ -187,7 +187,7 @@ int main(void)
                 tb_set_cursor(curs_offs_x, global.cursor_y);
 
                 // zero terminate
-                input.buf[input.buf_len] = 0;
+                input.text[input.len] = 0;
 
                 // print new message
                 time(&now);
@@ -200,7 +200,7 @@ int main(void)
                     err_exit("Error while sending message.");
 
                 // reset buffer
-                input.buf_len = 0;
+                input.len = 0;
 
                 // update the screen
                 // NOTE: kind of wasteful cause we should only display new message
@@ -211,28 +211,28 @@ int main(void)
             // remove word
             case TB_KEY_CTRL_W:
                 // Delete consecutive space
-                while (input.buf[input.buf_len - 1] == ' ' && global.cursor_x > curs_offs_x) {
+                while (input.text[input.len - 1] == ' ' && global.cursor_x > curs_offs_x) {
                     global.cursor_x--;
-                    input.buf_len--;
+                    input.len--;
                     tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
                 }
                 // Delete until next non-space
-                while (input.buf[input.buf_len - 1] != ' ' && global.cursor_x > curs_offs_x) {
+                while (input.text[input.len - 1] != ' ' && global.cursor_x > curs_offs_x) {
                     global.cursor_x--;
-                    input.buf_len--;
+                    input.len--;
                     tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
                 }
-                input.buf[input.buf_len] = 0;
+                input.text[input.len] = 0;
                 break;
             }
 
-            // append pressed character to input.buf
+            // append pressed character to input.text
             // TODO: wrap instead
-            if (ev.ch > 0 && input.buf_len < MSG_MAX && input.buf_len < global.width - 3 - 1) {
+            if (ev.ch > 0 && input.len < MSG_MAX && input.len < global.width - 3 - 1) {
                 tb_printf(global.cursor_x, global.cursor_y, 0, 0, "%c", ev.ch);
                 global.cursor_x++;
 
-                input.buf[input.buf_len++] = ev.ch;
+                input.text[input.len++] = ev.ch;
             }
 
         } else if (fds[FD_SERVER].revents & POLLIN) {

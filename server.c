@@ -15,12 +15,14 @@
 // - max y for new messages and make them scroll
 // - check resize event
 // - asynchronously receive/send a message
+// - fix receiving messages with arbitrary text length
 
 // TODO: send message to all other clients
 // - implement different rooms
 // - implement history
 // - implement tls
 
+#include "common.h"
 #include "config.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -32,6 +34,8 @@
 
 #define MAX_CONNECTIONS 5
 #define FD_MAX MAX_CONNECTIONS + 1
+
+static const char *filename = "history.dat";
 
 enum { FD_SERVER = 0 };
 int serverfd;
@@ -156,7 +160,6 @@ int main(void)
                     printf("Retransmitted message to client %d.\n", j);
             }
 
-
             // // TODO: check if bytes are correct
             // FILE *f = fopen("srv_recv.bin", "wb");
             // fwrite(&msg_recv, sizeof(struct message), 1, f);
@@ -164,7 +167,6 @@ int main(void)
             //
             // printf("written %lu bytes to srv_recv.bin\n", sizeof(msg_recv));
             // return 0;
-
         }
     }
 
