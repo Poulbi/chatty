@@ -10,21 +10,7 @@
 // current user's name
 #define USERNAME "unrtdqttr"
 
-// wrapper for write
-void writef(char *format, ...)
-{
-    va_list args;
-    char buf[BUF_MAX +1];
-    va_start(args, format);
-
-    vsnprintf(buf, sizeof(buf), format, args);
-    va_end(args);
-
-    int n = 0;
-    while (*(buf + n) != 0)
-        n++;
-    write(0, buf, n);
-}
+void writef(char* format, ...);
 
 struct message {
     char buf[MSG_MAX];
