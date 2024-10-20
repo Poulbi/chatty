@@ -20,10 +20,10 @@
 // TODO: send message to all other clients
 // - implement different rooms
 // - implement history
+//  - [ ] fix server copying the bytes correctly
 // - implement tls
 
 #include "common.h"
-#include "config.h"
 #include <arpa/inet.h>
 #include <errno.h>
 #include <poll.h>
@@ -62,17 +62,15 @@ int main(void)
 
     const struct sockaddr_in address = {
         AF_INET,
-        htons(PORT),
+        htons(9999),
         {0},
     };
 
-    if (bind(serverfd, (struct sockaddr *)&address, sizeof(address))) {
+    if (bind(serverfd, (struct sockaddr *)&address, sizeof(address)))
         err_exit("Error while binding.");
-    }
 
-    if (listen(serverfd, BUF_MAX)) {
+    if (listen(serverfd, BUF_MAX))
         err_exit("Error while listening");
-    }
 
     writef("Listening on localhost:%d\n", PORT);
 
@@ -144,6 +142,7 @@ int main(void)
                 nclient--;
                 break;
             } else if (nrecv == -1) {
+                // TODO: this can happen when connect is reset by pear
                 err_exit("Error while receiving from client socket.");
             }
 
@@ -160,12 +159,10 @@ int main(void)
                     printf("Retransmitted message to client %d.\n", j);
             }
 
-            // // TODO: check if bytes are correct
-            // FILE *f = fopen("srv_recv.bin", "wb");
-            // fwrite(&msg_recv, sizeof(struct message), 1, f);
-            // fclose(f);
-            //
-            // printf("written %lu bytes to srv_recv.bin\n", sizeof(msg_recv));
+            // // TODO: Serialize received message
+            FILE *f = fopen(filename, "wb");
+            save_message(&msg_recv, f);
+            fclose(f);
             // return 0;
         }
     }

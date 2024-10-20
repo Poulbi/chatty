@@ -1,5 +1,4 @@
 #include "common.h"
-#include "config.h"
 
 #include <stdarg.h>
 #include <stdint.h>
@@ -9,8 +8,8 @@
 
 void writef(char *format, ...)
 {
+    char buf[255 + 1];
     va_list args;
-    char buf[BUF_MAX + 1];
     va_start(args, format);
 
     vsnprintf(buf, sizeof(buf), format, args);
@@ -50,8 +49,8 @@ u8 save_message(struct message *msg, FILE *f)
     if (len == 0)
         err = 1;
 
-    fwrite(&msg->timestamp, sizeof(*msg->timestamp) * MSG_TIMESTAMP_LEN, 1, f);
-    fwrite(&msg->author, sizeof(*msg->author) * MSG_AUTHOR_LEN, 1, f);
+    fwrite(&msg->timestamp, sizeof(*msg->timestamp) * MESSAGE_TIMESTAMP_LEN, 1, f);
+    fwrite(&msg->author, sizeof(*msg->author) * MESSAGE_AUTHOR_LEN, 1, f);
     fwrite(&len, sizeof(len), 1, f);
     fputs(msg->text, f);
 
@@ -60,7 +59,7 @@ u8 save_message(struct message *msg, FILE *f)
 
 u8 load_message(struct message *msg, FILE *f)
 {
-    fread(msg, sizeof(*msg->timestamp) * MSG_TIMESTAMP_LEN + sizeof(*msg->author) * MSG_AUTHOR_LEN, 1, f);
+    fread(msg, sizeof(*msg->timestamp) * MESSAGE_TIMESTAMP_LEN + sizeof(*msg->author) * MESSAGE_AUTHOR_LEN, 1, f);
     u16 len;
     fread(&len, sizeof(len), 1, f);
     if (len == 0) {
