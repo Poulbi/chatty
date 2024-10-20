@@ -39,3 +39,11 @@ u8 save_message(struct message *msg, FILE *f);
 // load the message msg from file f, returns zero on success, returns 1 if the msg.text
 // was empty which should not be allowed.
 u8 load_message(struct message *msg, FILE *f);
+
+// Send a stream of bytes containing msg
+// return -1 if send() returns -1. Otherwise returns number of bytes sent.
+u32 send_message(struct message msg, u32 serverfd);
+// Receives a stream of bytes and populates msg with the data received
+// if recv() returns 0 or -1 it will return early and return 0 or -1 accordingly.
+// Otherwise returns the number of bytes received
+u32 receive_message(struct message *msg, u32 clientfd);

@@ -79,10 +79,10 @@ void screen_welcome()
 void add_message(struct message msg)
 {
     int i;
-    for (i = 0; (messages[nmessages].text[i] = msg.text[i]); i++)
+    messages[nmessages].text = input.text;
         ;
-    messages[nmessages].text[i] = 0;
-    messages[nmessages].len     = i;
+    messages[nmessages].text[input.len] = 0;
+    messages[nmessages].len     = input.len;
     for (i = 0; (messages[nmessages].timestamp[i] = msg.timestamp[i]); i++)
         ;
     messages[nmessages].timestamp[i] = 0;
@@ -109,6 +109,8 @@ int main(void)
     time_t now;
     // localtime of new sent message
     struct tm *ltime;
+    char buf[MESSAGE_MAX];
+    input.text = buf;
 
     int serverfd, ttyfd, resizefd;
     struct message msg_recv          = {0};
@@ -233,17 +235,9 @@ int main(void)
         } else if (fds[FD_SERVER].revents & POLLIN) {
             int nrecv = recv(serverfd, &msg_recv, sizeof(struct message), 0);
 
-            // // TODO: check if bytes are correct
-            // cleanup();
-            // FILE *f = fopen("client_recv.bin", "wb");
-            // fwrite(&msg_recv, sizeof(struct message), 1, f);
-            // fclose(f);
-            //
-            // printf("written %lu bytes to client_recv.bin\n", sizeof(msg_recv));
-            // return 0;
-
-            // Server closes
             if (nrecv == 0) {
+                // Server closed
+                // TODO: error message like (disconnected)
                 break;
             } else if (nrecv == -1) {
                 err_exit("Error while receiveiving from server.");
