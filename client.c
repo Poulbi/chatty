@@ -1,10 +1,5 @@
 // Client for chatty
 
-// TODO:
-// - bug: when having multiple messages and resizing a lot, the output will be in shambles
-// - bug: when resizing afters sending messages over network it crashes
-// - use pointer for add_message
-
 // clang-format off
 #define TB_IMPL
 #include "termbox2.h"
