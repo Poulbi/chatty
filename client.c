@@ -10,7 +10,6 @@
 #include "termbox2.h"
 // clang-format on
 #include "common.h"
-#include "config.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -58,6 +57,7 @@ void cleanup()
             writef("Error while closing server socket. errno: %d\n", errno);
 }
 
+// panic
 void err_exit(const char *msg)
 {
     cleanup();
@@ -227,8 +227,8 @@ int main(void)
             }
 
             // append pressed character to input.text
-            // TODO: wrap instead
-            if (ev.ch > 0 && input.len < MSG_MAX && input.len < global.width - 3 - 1) {
+            // TODO: wrap instead, allocate more ram for the message instead
+            if (ev.ch > 0 && input.len < MESSAGE_MAX && input.len < global.width - 3 - 1) {
                 tb_printf(global.cursor_x, global.cursor_y, 0, 0, "%c", ev.ch);
                 global.cursor_x++;
 

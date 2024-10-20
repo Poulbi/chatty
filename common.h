@@ -1,6 +1,19 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#define PORT 9983
+// max buffer size sent over network
+// TODO: choose a better size
+#define BUF_MAX 256
+// max size for a message sent
+#define MESSAGE_MAX 256
+// max length of author field
+#define MESSAGE_AUTHOR_LEN 12
+// max length of timestamp field
+#define MESSAGE_TIMESTAMP_LEN 9
+// current user's name
+#define USERNAME "Jef Koek"
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -8,8 +21,8 @@ typedef uint32_t u32;
 // To serialize the text that could be arbitrary length the lenght is encoded after the author
 // string and before the text.
 struct message {
-    char timestamp[9]; // HH:MM:SS
-    char author[12];
+    char author[MESSAGE_AUTHOR_LEN];
+    char timestamp[MESSAGE_TIMESTAMP_LEN]; // HH:MM:SS
     u16 len;
     char *text;
 };
