@@ -1,5 +1,6 @@
 # Chatty
 - use memory arena's to manage memory
+- spec for the stream protocol
 
 # Server
 The idea is the following:

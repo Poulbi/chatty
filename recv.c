@@ -1,18 +1,20 @@
+// Minimal server implementation for probing out things
+
 #include "common.h"
 #include <arpa/inet.h>
+#include <errno.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-#include <errno.h>
 
 int main(void)
 {
-    int serverfd, clientfd;
-    int on = 1;
+    u32 serverfd, clientfd;
+    u8 on = 1;
 
     const struct sockaddr_in address = {
         AF_INET,
-        htons(9999),
+        htons(PORT),
         {0},
     };
 
@@ -23,9 +25,7 @@ int main(void)
 
     listen(serverfd, 256);
 
-    writef("serverfd: %d\n", serverfd);
     clientfd = accept(serverfd, 0, 0);
-    writef("clientfd: %d\n", clientfd);
 
     struct pollfd fds[1] = {
         {clientfd, POLLIN, 0},
@@ -37,29 +37,19 @@ int main(void)
             return 2;
 
         if (fds[0].revents & POLLIN) {
-            int nrecv;
+            u8 recv_buf[BUF_MAX];
+            u32 nrecv = recv(clientfd, recv_buf, sizeof(recv_buf), 0);
 
-            char buf[20];
-            
-            nrecv = recv(clientfd, buf, sizeof(buf), 0);
-            printf("received %d bytes\n", nrecv);
-            nrecv = recv(clientfd, buf, sizeof(buf), 0);
-            printf("received %d bytes\n", nrecv);
-            nrecv = recv(clientfd, buf, sizeof(buf), 0);
-            printf("received %d bytes\n", nrecv);
-
-            return 3;
-
+            writef("client(%d): %d bytes received.\n", clientfd, nrecv);
             if (nrecv == -1) {
                 return errno;
             } else if (nrecv == 0) {
-                writef("Disconnect.\n");
-                fds[0].fd = -1;
+                writef("client(%d): disconnected.\n", clientfd);
+                fds[0].fd      = -1;
                 fds[0].revents = 0;
                 close(clientfd);
-            } 
-
-            writef("received: %d bytes\n", nrecv);
+                return 0;
+            }
         }
     }
 
