@@ -29,6 +29,7 @@ The idea is the following:
 # Client
 - bug: when having multiple messages and resizing a lot, the output will be in shambles
 - bug: when resizing afters sending messages over network it crashes
+- bug: all messages using the same buffer for text
 - use pointer for add_message
 - validation of sent/received messages
 - handle disconnection
