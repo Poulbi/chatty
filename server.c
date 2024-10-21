@@ -30,7 +30,7 @@ int main(void)
 {
     u32 clientfd;
     u16 nclient             = 0;
-    u8 on                  = 1;
+    u32 on                  = 1;
     struct message msg_recv = {0};
 
     serverfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP);
