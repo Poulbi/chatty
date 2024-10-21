@@ -26,8 +26,6 @@ void timestamp(char timestamp[MESSAGE_TIMESTAMP_LEN])
     strftime(timestamp, MESSAGE_TIMESTAMP_LEN, "%H:%M:%S", ltime);
 }
 
-
-
 int main(void)
 {
     serverfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -45,15 +43,13 @@ int main(void)
 
     struct message input = {
         .author    = "Friendship",
-        .timestamp = ""
     };
-    input.text = "HII!!";
+    input.text = "Hello from send";
     input.len  = str_len(input.text);
+    printf("input.len: %d\n", input.len);
     timestamp(input.timestamp);
 
     send_message(input, serverfd);
-    // send_message(input);
-    // send_message(input);
 
     return 0;
 }
