@@ -1,0 +1,5 @@
+-Wall
+-Werror
+-pedantic
+-std=c99
+-O3
