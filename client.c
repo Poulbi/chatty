@@ -1,5 +1,8 @@
 // Client for chatty
 
+// initial size for the messages array
+#define MESSAGES_SIZE 5
+
 // clang-format off
 #define TB_IMPL
 #include "termbox2.h"
@@ -31,21 +34,27 @@ struct message input = {
     .timestamp = {0},
     .len       = 0,
 };
-// All messages sent and received in order
-struct message *messages;
 // current amount of messages
 int nmessages = 0;
 // length of messages array
-int messages_len = 2;
+int messages_size = MESSAGES_SIZE;
+// All messages sent and received in order
+struct message messages[MESSAGES_SIZE] = {0};
 // incremented each time a new message is printed
 int msg_y = 0;
 
-void cleanup()
+// Cleans up resources, should called before exiting.
+void cleanup(void);
+// Displays an error message msg, followed by the errno variable and exits exeuction.
+void err_exit(const char *msg);
+// Display the welcome ui screen containing the prompt and messages array.
+void scren_welcome(void);
+// Append msg to the messages array.  Returns -1 if there was no space in the messages array
+// otherwise returns 0 on success.
+u8 message_add(struct message msg);
+
+void cleanup(void)
 {
-    free(messages);
-    if (messages == NULL) {
-        writef("something wrong happened.");
-    }
     tb_shutdown();
     if (serverfd)
         if (close(serverfd))
@@ -60,7 +69,7 @@ void err_exit(const char *msg)
     _exit(1);
 }
 
-void screen_welcome()
+void screen_welcome(void)
 {
     tb_set_cursor(curs_offs_x, global.height - prompt_offs_y);
     tb_print(0, global.height - prompt_offs_y, 0, 0, ">");
@@ -75,9 +84,12 @@ void screen_welcome()
     }
 }
 
-// Append the message to the messages array
-void add_message(struct message msg)
+u8 message_add(struct message msg)
 {
+    if (nmessages == messages_size) {
+        return -1;
+    }
+
     int i;
     messages[nmessages].text = input.text;
         ;
@@ -92,13 +104,7 @@ void add_message(struct message msg)
     nmessages++;
     msg_y++;
 
-    if (nmessages == messages_len) {
-        int new_size = 5;
-        messages     = realloc(messages, new_size * sizeof(struct message));
-        if (messages == NULL)
-            err_exit("Could not reallocate memory for messages.");
-        messages_len += new_size;
-    }
+    return 0;
 }
 
 int main(void)
@@ -119,10 +125,6 @@ int main(void)
         htons(PORT),
         {0},
     };
-
-    messages = malloc(messages_len * sizeof(struct message));
-    if (messages == NULL)
-        err_exit("Could not allocate memory for messages.");
 
     tb_init();
     bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
@@ -191,7 +193,7 @@ int main(void)
                 ltime = localtime(&now);
                 strftime(input.timestamp, sizeof(input.timestamp), "%H:%M:%S", ltime);
 
-                add_message(input);
+                message_add(input);
 
                 if (send(serverfd, &input, sizeof(input), 0) == -1)
                     err_exit("Error while sending message.");
@@ -242,7 +244,7 @@ int main(void)
             } else if (nrecv == -1) {
                 err_exit("Error while receiveiving from server.");
             }
-            add_message(msg_recv);
+            message_add(msg_recv);
             tb_clear();
             screen_welcome();
 
