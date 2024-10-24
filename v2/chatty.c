@@ -195,6 +195,25 @@ int main(int argc, char **argv)
 
             u8 exit = 0;
             switch (ev.key) {
+            case TB_KEY_CTRL_W:
+                // delete consecutive whitespace
+                while (input_len) {
+                    if (input[input_len - 1] == L' ') {
+                        input[input_len - 1] = 0;
+                        input_len--;
+                        continue;
+                    }
+                    break;
+                }
+                // delete until whitespace
+                while (input_len) {
+                    if (input[input_len - 1] == L' ')
+                        break;
+                    // erase
+                    input[input_len - 1] = 0;
+                    input_len--;
+                }
+                break;
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
                 exit = 1;
