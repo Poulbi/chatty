@@ -12,7 +12,7 @@
 #define MAX_CONNECTIONS 5
 #define FD_MAX MAX_CONNECTIONS + 1
 
-static const char *filename = "history.dat";
+// static const u8 *filename = "history.dat";
 
 enum { FD_SERVER = 0 };
 u32 serverfd;
@@ -31,7 +31,7 @@ int main(void)
     u32 clientfd;
     u16 nclient             = 0;
     u32 on                  = 1;
-    struct message msg_recv = {0};
+    Message msg_recv = {0};
 
     serverfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, IPPROTO_TCP);
     if (setsockopt(serverfd, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on)))
@@ -107,7 +107,7 @@ int main(void)
 
             clientfd = fds[i].fd;
 
-            nrecv = receive_message(&msg_recv, clientfd);
+            nrecv = message_receive(&msg_recv, clientfd);
             if (nrecv == 0) {
                 printf("client %d disconnected.\n", i);
                 fds[i].fd      = -1;
@@ -123,12 +123,14 @@ int main(void)
                 err_exit("Error while receiving from client socket.");
             }
 
+            writef("Received %d bytes from client(%d): %s [%s] (%d)%s\n", nrecv, clientfd - serverfd, msg_recv.timestamp, msg_recv.author, msg_recv.text_len, msg_recv.text);
+
             // TODO:
             for (u32 j = 1; j <= nclient; j++) {
                 // skip the client that sent the message
                 if (j == i)
                     continue;
-                if (send(fds[j].fd, &msg_recv, nrecv, 0) == -1)
+                if (message_send(&msg_recv, fds[j].fd) == -1)
                     printf("Error while sendig message to client %d. errno: %d\n", j, errno);
                 else
                     printf("Retransmitted message to client %d.\n", j);
@@ -139,7 +141,6 @@ int main(void)
             // save_message(&msg_recv, f);
             // fclose(f);
             // // return 0;
-
         }
     }
 
