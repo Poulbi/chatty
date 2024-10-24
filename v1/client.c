@@ -29,17 +29,17 @@ int prompt_offs_y = 3;
 // filedescriptor for server
 static int serverfd;
 // Input message to be send
-struct message input = {
+Message input = {
     .author    = USERNAME,
     .timestamp = {0},
-    .len       = 0,
+    .text_len       = 0,
 };
 // current amount of messages
 int nmessages = 0;
 // length of messages array
 int messages_size = MESSAGES_SIZE;
 // All messages sent and received in order
-struct message messages[MESSAGES_SIZE] = {0};
+Message messages[MESSAGES_SIZE] = {0};
 // incremented each time a new message is printed
 int msg_y = 0;
 
@@ -51,7 +51,7 @@ void err_exit(const char *msg);
 void scren_welcome(void);
 // Append msg to the messages array.  Returns -1 if there was no space in the messages array
 // otherwise returns 0 on success.
-u8 message_add(struct message msg);
+u8 messages_add(Message *msg);
 
 void cleanup(void)
 {
@@ -84,22 +84,16 @@ void screen_welcome(void)
     }
 }
 
-u8 message_add(struct message msg)
+u8 messages_add(Message *msg)
 {
     if (nmessages == messages_size) {
         return -1;
     }
 
-    int i;
-    messages[nmessages].text = input.text;
-        ;
-    messages[nmessages].text[input.len] = 0;
-    messages[nmessages].len     = input.len;
-    for (i = 0; (messages[nmessages].timestamp[i] = msg.timestamp[i]); i++)
-        ;
-    messages[nmessages].timestamp[i] = 0;
-    for (i = 0; (messages[nmessages].author[i] = msg.author[i]); i++)
-        ;
+    memcpy(messages[nmessages].author, msg->author, MESSAGE_AUTHOR_LEN);
+    memcpy(messages[nmessages].timestamp, msg->timestamp, MESSAGE_TIMESTAMP_LEN);
+    messages[nmessages].text_len     = msg->text_len;
+    messages[nmessages].text = msg->text;
 
     nmessages++;
     msg_y++;
@@ -119,7 +113,7 @@ int main(void)
     input.text = buf;
 
     int serverfd, ttyfd, resizefd;
-    struct message msg_recv          = {0};
+    Message msg_recv          = {0};
     const struct sockaddr_in address = {
         AF_INET,
         htons(PORT),
@@ -173,11 +167,11 @@ int main(void)
                     tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
                 }
                 tb_set_cursor(curs_offs_x, global.cursor_y);
-                input.len = 0;
+                input.text_len = 0;
                 break;
             // send message
             case TB_KEY_CTRL_M:
-                if (input.len <= 0)
+                if (input.text_len <= 0)
                     break;
                 while (global.cursor_x > curs_offs_x) {
                     global.cursor_x--;
@@ -186,20 +180,20 @@ int main(void)
                 tb_set_cursor(curs_offs_x, global.cursor_y);
 
                 // zero terminate
-                input.text[input.len] = 0;
+                input.text[input.text_len] = 0;
 
                 // print new message
                 time(&now);
                 ltime = localtime(&now);
-                strftime(input.timestamp, sizeof(input.timestamp), "%H:%M:%S", ltime);
+                strftime((char*)input.timestamp, sizeof(input.timestamp), "%H:%M:%S", ltime);
 
-                message_add(input);
+                messages_add(&input);
 
-                if (send(serverfd, &input, sizeof(input), 0) == -1)
+                if (message_send(&input, serverfd) == -1)
                     err_exit("Error while sending message.");
 
                 // reset buffer
-                input.len = 0;
+                input.text_len = 0;
 
                 // update the screen
                 // NOTE: kind of wasteful cause we should only display new message
@@ -210,32 +204,32 @@ int main(void)
             // remove word
             case TB_KEY_CTRL_W:
                 // Delete consecutive space
-                while (input.text[input.len - 1] == ' ' && global.cursor_x > curs_offs_x) {
+                while (input.text[input.text_len - 1] == ' ' && global.cursor_x > curs_offs_x) {
                     global.cursor_x--;
-                    input.len--;
+                    input.text_len--;
                     tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
                 }
                 // Delete until next non-space
-                while (input.text[input.len - 1] != ' ' && global.cursor_x > curs_offs_x) {
+                while (input.text[input.text_len - 1] != ' ' && global.cursor_x > curs_offs_x) {
                     global.cursor_x--;
-                    input.len--;
+                    input.text_len--;
                     tb_print(global.cursor_x, global.cursor_y, 0, 0, " ");
                 }
-                input.text[input.len] = 0;
+                input.text[input.text_len] = 0;
                 break;
             }
 
             // append pressed character to input.text
             // TODO: wrap instead, allocate more ram for the message instead
-            if (ev.ch > 0 && input.len < MESSAGE_MAX && input.len < global.width - 3 - 1) {
+            if (ev.ch > 0 && input.text_len < MESSAGE_MAX && input.text_len < global.width - 3 - 1) {
                 tb_printf(global.cursor_x, global.cursor_y, 0, 0, "%c", ev.ch);
                 global.cursor_x++;
 
-                input.text[input.len++] = ev.ch;
+                input.text[input.text_len++] = ev.ch;
             }
 
         } else if (fds[FD_SERVER].revents & POLLIN) {
-            int nrecv = recv(serverfd, &msg_recv, sizeof(struct message), 0);
+            int nrecv = message_receive(&msg_recv, serverfd);
 
             if (nrecv == 0) {
                 // Server closed
@@ -244,7 +238,7 @@ int main(void)
             } else if (nrecv == -1) {
                 err_exit("Error while receiveiving from server.");
             }
-            message_add(msg_recv);
+            messages_add(&msg_recv);
             tb_clear();
             screen_welcome();
 

@@ -15,6 +15,7 @@ The idea is the following:
 # Server
 - min height & width
 - wrapping input
+- [ ] bug: retransmissed message have no text
 - [ ] history
 - [x] max y for new messages and make them scroll
 - [x] check resize event
@@ -31,13 +32,17 @@ The idea is the following:
 - bug: when having multiple messages and resizing a lot, the output will be in shambles
 - bug: when resizing afters sending messages over network it crashes
 - bug: all messages using the same buffer for text
+- bug: 1. open chatty, send a message with send, messages won't be received by the server
+- bug: memcpy is overlapping a byte in the next message when messages_add
 - use pointer for add_message
 - validation of sent/received messages
 - handle disconnection
 
 # Questions
 - will two consecutive sends be read in one recv
+    - not always.
 - can you recv a message in two messages
+    - yes, done.
 
 # Message protocol
 Version 1
