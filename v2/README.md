@@ -50,3 +50,8 @@ M.text = ArenaPush(msgTextArena, M.text_len);
 ```
 Notice, that this depends on knowing the text's length before allocating the memory.
 
+
+## Keybinds
+- `Ctrl+C` | `Ctrl+D`: quits
+- `Ctrl+U`: Erase input line
+- `Ctrl+W`: Erase word behind cursor
