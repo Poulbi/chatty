@@ -13,6 +13,7 @@ The idea is the following:
 - [x] sending message
 - [x] bug: do not allow sending empty message
 - [x] wrapping messages
+- [ ] bug: when sending message after diconnect (serverfd?)
 
 ## server
 - [ ] log messages to file (save history)
