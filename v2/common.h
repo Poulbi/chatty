@@ -15,13 +15,10 @@
 #define PORT 9983
 // buffer size for holding data received from recv()
 // TODO: choose a good size
-#define STREAM_BUF 256
+#define STREAM_BUF 1024
 // max data received in one recv() call on serverfd
 // TODO: choose a good size
-#define STREAM_LIMIT 512
-// max message that can be displayed with writef()
-#define WRITEF_MAX 256
-
+#define STREAM_LIMIT 1024
 
 typedef uint8_t u8;
 typedef uint16_t u16;

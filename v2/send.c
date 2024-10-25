@@ -4,9 +4,9 @@
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
+#include <stdlib.h>
 #include <unistd.h>
 
-#include "arena.h"
 #include "common.h"
 
 int main(int argc, char **argv)
