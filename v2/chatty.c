@@ -415,7 +415,12 @@ int main(int argc, char **argv)
                 break;
             case TB_KEY_CTRL_M: // send message
                 if (input_len == 0)
+                    // do not send empty message
                     break;
+                if (fds[FDS_SERVER].fd == -1)
+                    // do not send message to disconnected server
+                    break;
+
                 // null terminate
                 input[input_len] = 0;
                 input_len++;
