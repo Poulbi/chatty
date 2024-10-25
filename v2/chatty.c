@@ -428,8 +428,9 @@ int main(int argc, char **argv)
             }
             if (quit)
                 break;
+        }
 
-        } else if (fds[FDS_RESIZE].revents & POLLIN) {
+        if (fds[FDS_RESIZE].revents & POLLIN) {
             tb_poll_event(&ev);
         }
 
