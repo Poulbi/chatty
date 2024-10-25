@@ -219,6 +219,8 @@ int main(int argc, char **argv)
                 exit = 1;
                 break;
             case TB_KEY_CTRL_M: // send message
+                if (input_len == 0)
+                    break;
                 // null terminate
                 input[input_len] = 0;
                 input_len++;
