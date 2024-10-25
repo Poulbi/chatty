@@ -86,7 +86,7 @@ void popup(u32 fg, u32 bg, char *text)
 // TODO:(bug) text after pfx is wrapped one too soon
 // TODO: text == NULL to know how many lines *would* be printed
 // TODO: check if text[i] goes out of bounds
-int tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, s32 text_len, char *pfx, s32 limit)
+int tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, u32 fg_pfx, u32 bg_pfx, char *pfx, s32 limit)
 {
     assert(limit > 0);
 
@@ -111,14 +111,18 @@ int tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, s32 text_len, ch
     // used when retrying to get a longer limit
     u32 failed = 0;
 
+    u32 text_len = 0;
+    while (text[text_len] != 0)
+        text_len++;
+
     // NOTE: We can assume that we need to wrap, therefore print a newline after the prefix string
     if (pfx != NULL) {
-        tb_printf(x, ly, fg, bg, "%s", pfx);
+        tb_printf(x, ly, fg_pfx, bg_pfx, "%s", pfx);
 
         s32 pfx_len = strlen(pfx);
         if (limit > pfx_len + text_len) {
             // everything fits on one line
-            tb_printf(x, y, fg, bg, "%s%ls", pfx, text);
+            tb_printf(pfx_len, y, fg, bg, "%ls", text);
             return 1;
         } else {
             ly++;
@@ -169,7 +173,8 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
 
     // the minimum height required is the hight for the box prompt
     // the minimum width required is that one character should fit in the box prompt
-    if (global.height < box_height || global.width < (box_x + box_mar_x * 2 + box_pad_x * 2 + box_bwith * 2 + 1)) {
+    if (global.height < box_height ||
+        global.width < (box_x + box_mar_x * 2 + box_pad_x * 2 + box_bwith * 2 + 1)) {
         // + 1 for cursor
         tb_hide_cursor();
         return;
@@ -185,14 +190,14 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
     //  you doing?
     //  03:24:33 [TlasT] I am fine
     {
+        u32 freesp = global.height - box_height;
+        if (freesp <= 0)
+            goto draw_prompt;
+
         Message *messages = msgsArena->memory;
         assert(messages != NULL);
         // on what line to print the current message, used for scrolling
         u32 msg_y = 0;
-
-        u32 freesp = global.height - (global.height - box_height);
-        if (freesp <= 0)
-            goto draw_prompt;
 
         u32 nmessages = (msgsArena->pos / sizeof(Message));
         u32 offs = (nmessages > freesp) ? nmessages - freesp : 0;
@@ -209,10 +214,11 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
             u32 ty = 0;
             char pfx[AUTHOR_LEN + TIMESTAMP_LEN - 2 + 5] = {0};
             sprintf(pfx, "%s [%s] ", messages[i].timestamp, messages[i].author);
-            ty = tb_printf_wrap(0, msg_y, fg, 0, messages[i].text, messages[i].text_len - 1, pfx, global.width);
+            ty = tb_printf_wrap(0, msg_y, 0, 0, messages[i].text, fg, 0, pfx, global.width);
             msg_y += ty;
         }
 
+    draw_prompt:
         // Draw prompt box which is a box made out of
         // should look like this: ╭───────╮
         //                        │ text█ │
@@ -221,59 +227,64 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
         // the middle/inner part is opaque
         // TODO: wrapping when the text is bigger & alternated with scrolling when there is not
         // enough space.
-    draw_prompt: {
+        {
+            int box_len = 0;
+            if (global.width >= box_max_len + 2 * box_mar_x)
+                box_len = box_max_len;
+            else
+                box_len = global.width - box_mar_x * 2;
 
-        int box_len = 0;
-        if (global.width >= box_mar_x * 2 + box_min_len) {
-            // whole screen, but max out at box_max_len
-            box_len = (global.width >= box_max_len + 2) ? box_max_len : global.width - box_mar_x * 2;
-        } else {
-            box_len = box_mar_x * 2 + box_min_len; // left + right side
+            // +2 for corners and null terminator
+            wchar_t box_up[box_len + 1];
+            wchar_t box_in[box_len + 1];
+            wchar_t box_down[box_len + 1];
+            wchar_t lr = L'─', ur = L'╭', rd = L'╮', dr = L'╰', ru = L'╯', ud = L'│';
+
+            // top bar
+            box_up[0] = ur;
+            fillstr(box_up + 1, lr, box_len - 1);
+            box_up[box_len - 1] = rd;
+            box_up[box_len] = 0;
+            // inner part
+            fillstr(box_in + 1, L' ', box_len - 1);
+            box_in[0] = ud;
+            box_in[box_len - 1] = ud;
+            box_in[box_len] = 0;
+            // bottom bar
+            box_down[0] = dr;
+            fillstr(box_down + 1, lr, box_len - 1);
+            box_down[box_len - 1] = ru;
+            box_down[box_len] = 0;
+
+            tb_printf(box_x + box_mar_x, box_y, 0, 0, "%ls", box_up);
+            tb_printf(box_x + box_mar_x, box_y + 1, 0, 0, "%ls", box_in);
+            tb_printf(box_x + box_mar_x, box_y + 2, 0, 0, "%ls", box_down);
+
+            global.cursor_y = box_y + 1;
+
+            // NOTE: wrapping would be better.
+            // Scroll the text when it exceeds the prompt's box length
+            u32 freesp = box_len - box_pad_x * 2 - box_bwith * 2;
+            if (freesp <= 0)
+                return;
+
+            if (input_len > freesp) {
+                wchar_t *text_offs = input + (input_len - freesp);
+                tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", text_offs);
+                global.cursor_x = box_x + box_pad_x + box_mar_x + box_bwith + freesp;
+            } else {
+                global.cursor_x = prompt_x;
+                tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", input);
+            }
         }
 
-        // +2 for corners and null terminator
-        wchar_t box_up[box_len + 1];
-        wchar_t box_in[box_len + 1];
-        wchar_t box_down[box_len + 1];
-        wchar_t lr = L'─', ur = L'╭', rd = L'╮', dr = L'╰', ru = L'╯', ud = L'│';
-
-        // top bar
-        box_up[0] = ur;
-        fillstr(box_up + 1, lr, box_len - 1);
-        box_up[box_len - 1] = rd;
-        box_up[box_len] = 0;
-        // inner part
-        fillstr(box_in + 1, L' ', box_len - 1);
-        box_in[0] = ud;
-        box_in[box_len - 1] = ud;
-        box_in[box_len] = 0;
-        // bottom bar
-        box_down[0] = dr;
-        fillstr(box_down + 1, lr, box_len - 1);
-        box_down[box_len - 1] = ru;
-        box_down[box_len] = 0;
-
-        tb_printf(box_x + box_mar_x, box_y, 0, 0, "%ls", box_up);
-        tb_printf(box_x + box_mar_x, box_y + 1, 0, 0, "%ls", box_in);
-        tb_printf(box_x + box_mar_x, box_y + 2, 0, 0, "%ls", box_down);
-
-        global.cursor_y = box_y + 1;
-
-        // NOTE: wrapping would be better.
-        // Scroll the text when it exceeds the prompt's box length
-        u32 freesp = box_len - box_pad_x * 2 - box_bwith * 2;
-        if (freesp <= 0)
-            return;
-
-        if (input_len > freesp) {
-            wchar_t *text_offs = input + (input_len - freesp);
-            tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", text_offs);
-            global.cursor_x = box_x + box_pad_x + box_mar_x + box_bwith + freesp;
+        if (fds[FDS_SERVER].fd == -1) {
+            // show error popup
+            popup(TB_RED, TB_BLACK, "Server disconnected.");
+            tb_present();
         } else {
-            global.cursor_x = prompt_x;
-            tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", input);
+            bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
         }
-    }
     }
 }
 
