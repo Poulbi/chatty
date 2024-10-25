@@ -291,7 +291,9 @@ int main(int argc, char **argv)
     // Display loop
     screen_home(msgsArena, input, input_len);
     tb_present();
-    while (1) {
+
+    u8 quit = 0;
+    while (!quit) {
         err = poll(fds, FDS_MAX, TIMEOUT_POLL);
         // ignore resize events because we redraw the whole screen anyways.
         assert(err != -1 || errno == EINTR);
@@ -305,38 +307,44 @@ int main(int argc, char **argv)
 
             nrecv = recv(serverfd, buf, STREAM_LIMIT, 0);
             assert(nrecv != -1);
-            if (nrecv == 0) {
-                // TODO: Handle disconnection, aka wait for server to reconnect.
-                // Try to reconnect with 1 second timeout
-                // TODO: still listen for events
-                // NOTE: we want to display a popup, but still give the user the chance to do
-                // ctrl+c
-                u8 once = 0;
-                while (1) {
-                    err = close(serverfd);
-                    assert(err == 0);
 
+            // TODO: Handle this in a thread, the best way would be
+            // -> server disconnect info (somewhere, for now popup)
+            // -> user can still view messages, exit & type but not send
+            // -> try to reconnect in background
+            if (nrecv == 0) {
+                // show error popup
+                screen_home(msgsArena, input, input_len);
+                popup(TB_RED, TB_BLACK, "Server disconnected.");
+                tb_hide_cursor();
+                tb_present();
+
+                // close diconnected server's socket
+                err = close(serverfd);
+                assert(err == 0);
+
+                // try to reconnect with the server
+                while (1) {
                     serverfd = socket(AF_INET, SOCK_STREAM, 0);
                     assert(serverfd > 2); // greater than STDERR
 
                     err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
+                    // connection success
                     if (err == 0) {
                         bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
                         tb_clear();
                         break;
                     }
+
                     assert(errno == ECONNREFUSED);
 
-                    // Popup error message
-                    if (!once) {
-                        screen_home(msgsArena, input, input_len);
-                        tb_hide_cursor();
-                        tb_print(global.width / 2 - 10, global.height / 2, TB_RED, TB_BLACK, "Server disconnected!");
-                        tb_present();
-                        once = 1;
-                    }
-
                     sleep(TIMEOUT_RECONNECT);
+
+                    tb_peek_event(&ev, 80);
+                    if (ev.key == TB_KEY_CTRL_D || ev.key == TB_KEY_CTRL_C) {
+                        quit = 1;
+                        break;
+                    }
                 }
             } else {
 
@@ -349,11 +357,12 @@ int main(int argc, char **argv)
                 // copy the text to the allocated space
                 memcpy(recvmsg->text, buf + TIMESTAMP_LEN + AUTHOR_LEN + sizeof(recvmsg->text_len), recvmsg->text_len * sizeof(wchar_t));
             }
-        } else if (fds[FDS_TTY].revents & POLLIN) {
+        }
+
+        if (fds[FDS_TTY].revents & POLLIN) {
             // got a key event
             tb_poll_event(&ev);
 
-            u8 exit = 0;
             switch (ev.key) {
             case TB_KEY_CTRL_W:
                 // delete consecutive whitespace
@@ -376,7 +385,7 @@ int main(int argc, char **argv)
                 break;
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
-                exit = 1;
+                quit = 1;
                 break;
             case TB_KEY_CTRL_M: // send message
                 if (input_len == 0)
@@ -417,7 +426,7 @@ int main(int argc, char **argv)
 
                 break;
             }
-            if (exit)
+            if (quit)
                 break;
 
         } else if (fds[FDS_RESIZE].revents & POLLIN) {
