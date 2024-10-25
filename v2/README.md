@@ -15,6 +15,7 @@ The idea is the following:
 - wrapping messages
 - prompt
 - sending message
+- [x] bug: do not allow sending empty message
 
 ## server
 - log messages
