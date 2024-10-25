@@ -8,6 +8,7 @@
 #include <assert.h>
 #include <locale.h>
 #include <poll.h>
+#include <pthread.h>
 #include <sys/socket.h>
 
 #define TIMEOUT_POLL 60 * 1000
@@ -16,11 +17,47 @@
 
 // must be of AUTHOR_LEN -1
 static char username[AUTHOR_LEN] = "(null)";
+// file descriptros for polling
+static struct pollfd *fds = NULL;
+// mutex for locking fds when in thread_reconnect()
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 enum { FDS_SERVER = 0,
        FDS_TTY,
        FDS_RESIZE,
        FDS_MAX };
+
+// When the server sends a disconnect message this function must be called with the fds struct as
+// paramter.  To indicate that the server is offline the fds[FDS_SERVER] is set to -1.  When online
+// it is set to a non-zero value.
+// TODO: in screen_home / status bar put the disconnected state
+void *thread_reconnect(void *ptr)
+{
+    u32 serverfd, err;
+    const struct sockaddr_in address = {
+        AF_INET,
+        htons(PORT),
+        {0},
+    };
+
+    while (1) {
+        serverfd = socket(AF_INET, SOCK_STREAM, 0);
+        assert(serverfd > 2); // greater than STDERR
+        err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
+        if (err == 0)
+            break;
+        assert(errno == ECONNREFUSED);
+        sleep(TIMEOUT_RECONNECT);
+    }
+
+    // if the server would send a disconnect again and the polling catches up there could be two
+    // threads accessing fds.
+    pthread_mutex_lock(&mutex);
+    fds[FDS_SERVER].fd = serverfd;
+    pthread_mutex_unlock(&mutex);
+
+    return NULL;
+}
 
 // fill str array with char
 void fillstr(wchar_t *str, wchar_t ch, u32 len)
@@ -263,13 +300,16 @@ int main(int argc, char **argv)
     assert(serverfd > 2); // greater than STDERR
 
     err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
-    assert(err == 0);
+    if (err != 0) {
+        perror("Server");
+        return 1;
+    }
 
     tb_init();
-    bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
     tb_get_fds(&ttyfd, &resizefd);
 
-    struct pollfd fds[FDS_MAX] = {
+    // poopoo C cannot infer type
+    fds = (struct pollfd[FDS_MAX]){
         {serverfd, POLLIN, 0},
         {   ttyfd, POLLIN, 0},
         {resizefd, POLLIN, 0},
@@ -313,41 +353,16 @@ int main(int argc, char **argv)
             // -> user can still view messages, exit & type but not send
             // -> try to reconnect in background
             if (nrecv == 0) {
-                // show error popup
-                screen_home(msgsArena, input, input_len);
-                popup(TB_RED, TB_BLACK, "Server disconnected.");
-                tb_hide_cursor();
-                tb_present();
-
                 // close diconnected server's socket
                 err = close(serverfd);
                 assert(err == 0);
+                fds[FDS_SERVER].fd = -1; // ignore
+                // start trying to reconnect in a thread
+                pthread_t t;
+                err = pthread_create(&t, NULL, &thread_reconnect, fds);
+                assert(err == 0);
 
-                // try to reconnect with the server
-                while (1) {
-                    serverfd = socket(AF_INET, SOCK_STREAM, 0);
-                    assert(serverfd > 2); // greater than STDERR
-
-                    err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
-                    // connection success
-                    if (err == 0) {
-                        bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
-                        tb_clear();
-                        break;
-                    }
-
-                    assert(errno == ECONNREFUSED);
-
-                    sleep(TIMEOUT_RECONNECT);
-
-                    tb_peek_event(&ev, 80);
-                    if (ev.key == TB_KEY_CTRL_D || ev.key == TB_KEY_CTRL_C) {
-                        quit = 1;
-                        break;
-                    }
-                }
             } else {
-
                 Message *buf_msg = (Message *)buf; // helper for indexing memory
                 Message *recvmsg = ArenaPush(msgsArena, sizeof(Message));
                 // copy everything but the text
@@ -431,6 +446,7 @@ int main(int argc, char **argv)
         }
 
         if (fds[FDS_RESIZE].revents & POLLIN) {
+            // ignore
             tb_poll_event(&ev);
         }
 
