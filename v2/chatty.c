@@ -16,7 +16,7 @@
 #define TIMEOUT_RECONNECT 1
 
 // must be of AUTHOR_LEN -1
-static char username[AUTHOR_LEN] = "(null)";
+static u8 username[AUTHOR_LEN] = "(null)";
 // file descriptros for polling
 static struct pollfd *fds = NULL;
 // mutex for locking fds when in thread_reconnect()
@@ -26,6 +26,12 @@ enum { FDS_SERVER = 0,
        FDS_TTY,
        FDS_RESIZE,
        FDS_MAX };
+
+void *thread_reconnect(void *ptr);
+void fillstr(wchar_t *str, wchar_t ch, u32 len);
+void popup(u32 fg, u32 bg, char *text);
+u32 tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, u32 fg_pfx, u32 bg_pfx, char *pfx, s32 limit);
+void screen_home(Arena *msgsArena, wchar_t input[]);
 
 // When the server sends a disconnect message this function must be called with the fds struct as
 // paramter.  To indicate that the server is offline the fds[FDS_SERVER] is set to -1.  When online
@@ -56,15 +62,17 @@ void *thread_reconnect(void *ptr)
     fds[FDS_SERVER].fd = serverfd;
     pthread_mutex_unlock(&mutex);
 
+    // ask to redraw screen
+    raise(SIGWINCH);
+
     return NULL;
 }
 
 // fill str array with char
 void fillstr(wchar_t *str, wchar_t ch, u32 len)
 {
-    for (int i = 0; i < len; i++) {
+    for (u32 i = 0; i < len; i++)
         str[i] = ch;
-    }
 }
 
 // Centered popup displaying message in the appropriate cololrs
@@ -86,7 +94,7 @@ void popup(u32 fg, u32 bg, char *text)
 // TODO:(bug) text after pfx is wrapped one too soon
 // TODO: text == NULL to know how many lines *would* be printed
 // TODO: check if text[i] goes out of bounds
-int tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, u32 fg_pfx, u32 bg_pfx, char *pfx, s32 limit)
+u32 tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, u32 fg_pfx, u32 bg_pfx, char *pfx, s32 limit)
 {
     assert(limit > 0);
 
@@ -163,13 +171,16 @@ int tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, u32 fg_pfx, u32 
 
 // home screen, the first screen the user sees
 // it displays a prompt for user input and the received messages from msgsArena
-void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
+void screen_home(Arena *msgsArena, wchar_t input[])
 {
     // config options
-    const int box_max_len = 80;
-    const int box_min_len = 3;
-    const int box_x = 0, box_y = global.height - 3, box_pad_x = 1, box_mar_x = 1, box_bwith = 1, box_height = 3;
-    const int prompt_x = box_x + box_pad_x + box_mar_x + box_bwith + input_len;
+    const u32 box_max_len = 80;
+    const u32 box_min_len = 3;
+    const u32 box_x = 0, box_y = global.height - 3, box_pad_x = 1, box_mar_x = 1, box_bwith = 1, box_height = 3;
+    u32 input_len = 0;
+    while (input[input_len] != 0)
+        input_len++;
+    const u32 prompt_x = box_x + box_pad_x + box_mar_x + box_bwith + input_len;
 
     // the minimum height required is the hight for the box prompt
     // the minimum width required is that one character should fit in the box prompt
@@ -202,19 +213,19 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
         u32 nmessages = (msgsArena->pos / sizeof(Message));
         u32 offs = (nmessages > freesp) ? nmessages - freesp : 0;
 
-        for (int i = offs; i < nmessages; i++) {
+        for (u32 i = offs; i < nmessages; i++) {
             // Color user's own messages
             u32 fg = 0;
-            if (strncmp(username, (char *)messages[i].author, AUTHOR_LEN) == 0) {
+            if (strncmp((char *)username, (char *)messages[i].author, AUTHOR_LEN) == 0) {
                 fg = TB_CYAN;
             } else {
-                fg = TB_WHITE;
+                fg = TB_MAGENTA;
             }
 
             u32 ty = 0;
             char pfx[AUTHOR_LEN + TIMESTAMP_LEN - 2 + 5] = {0};
             sprintf(pfx, "%s [%s] ", messages[i].timestamp, messages[i].author);
-            ty = tb_printf_wrap(0, msg_y, 0, 0, messages[i].text, fg, 0, pfx, global.width);
+            ty = tb_printf_wrap(0, msg_y, TB_WHITE, 0, messages[i].text, fg, 0, pfx, global.width);
             msg_y += ty;
         }
 
@@ -228,7 +239,7 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
         // TODO: wrapping when the text is bigger & alternated with scrolling when there is not
         // enough space.
         {
-            int box_len = 0;
+            u32 box_len = 0;
             if (global.width >= box_max_len + 2 * box_mar_x)
                 box_len = box_max_len;
             else
@@ -281,9 +292,6 @@ void screen_home(Arena *msgsArena, wchar_t input[], u32 input_len)
         if (fds[FDS_SERVER].fd == -1) {
             // show error popup
             popup(TB_RED, TB_BLACK, "Server disconnected.");
-            tb_present();
-        } else {
-            bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
         }
     }
 }
@@ -340,13 +348,13 @@ int main(int argc, char **argv)
     char *errmsg = NULL;
 
     // Display loop
-    screen_home(msgsArena, input, input_len);
+    screen_home(msgsArena, input);
     tb_present();
 
     u8 quit = 0;
     while (!quit) {
         err = poll(fds, FDS_MAX, TIMEOUT_POLL);
-        // ignore resize events because we redraw the whole screen anyways.
+        // ignore resize events and use them to redraw the screen
         assert(err != -1 || errno == EINTR);
 
         tb_clear();
@@ -461,12 +469,13 @@ int main(int argc, char **argv)
                 break;
         }
 
+        // These are used to redraw the screen from threads
         if (fds[FDS_RESIZE].revents & POLLIN) {
             // ignore
             tb_poll_event(&ev);
         }
 
-        screen_home(msgsArena, input, input_len);
+        screen_home(msgsArena, input);
 
         tb_present();
     }
