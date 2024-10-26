@@ -356,7 +356,7 @@ int main(int argc, char **argv)
             u8 timestamp[TIMESTAMP_LEN];
             message_timestamp(timestamp);
 
-            nrecv = recv(serverfd, buf, STREAM_LIMIT, 0);
+            nrecv = recv(fds[FDS_SERVER].fd, buf, STREAM_LIMIT, 0);
             assert(nrecv != -1);
 
             // TODO: Handle this in a thread, the best way would be
@@ -365,7 +365,7 @@ int main(int argc, char **argv)
             // -> try to reconnect in background
             if (nrecv == 0) {
                 // close diconnected server's socket
-                err = close(serverfd);
+                err = close(fds[FDS_SERVER].fd);
                 assert(err == 0);
                 fds[FDS_SERVER].fd = -1; // ignore
                 // start trying to reconnect in a thread
@@ -439,7 +439,7 @@ int main(int argc, char **argv)
                 // copy everything but the text
                 memcpy(buf, sendmsg, AUTHOR_LEN + TIMESTAMP_LEN + sizeof(wchar_t));
                 memcpy(&mbuf->text, input, input_len * sizeof(wchar_t));
-                nsend = send(serverfd, buf, AUTHOR_LEN + TIMESTAMP_LEN + input_len * sizeof(wchar_t), 0);
+                nsend = send(fds[FDS_SERVER].fd, buf, AUTHOR_LEN + TIMESTAMP_LEN + input_len * sizeof(wchar_t), 0);
                 assert(nsend > 0);
 
             case TB_KEY_CTRL_U: // clear input
