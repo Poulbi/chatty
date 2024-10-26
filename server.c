@@ -48,15 +48,16 @@ int main(void)
         assert(err == 0);
     }
 
-    Arena *msgTextArena = ArenaAlloc(); // allocating text in messages that have a dynamic sized
-    Message mrecv = {0};                // message used for receiving messages from clients
-    u32 nrecv = 0;                      // number of bytes received
-    u32 nsend = 0;                      // number of bytes sent
-    u8 buf[STREAM_BUF] = {0};           // temporary buffer for received data, NOTE: this buffer
-                                        // is also use for retransmitting received messages to other
-                                        // clients.
+    Arena *msgTextArena = ArenaAlloc();          // allocating text in messages that have a dynamic sized
+    Message mrecv = {0};                         // message used for receiving messages from clients
+    u32 nrecv = 0;                               // number of bytes received
+    u32 recv_len;                                // Number of bytes of the message received over stream
+    u32 nsend = 0;                               // number of bytes sent
+    Arena *bufArena = ArenaAlloc();              // data in buf
+    u8 *buf = ArenaPush(bufArena, STREAM_LIMIT); // temporary buffer for receiving and sending data
+    Message *mbuf = (Message *)buf;              // pointer for indexing buf as a message
 
-    Arena *fdsArena = ArenaAlloc();
+    Arena *fdsArena = ArenaAlloc();        // arena for fds to accomodate multiple clients
     struct pollfd *fds = fdsArena->memory; // helper for indexing memory
     struct pollfd c = {0, POLLIN, 0};      // helper client structure fore reusing
     struct pollfd *fdsAddr;                // used for copying clients
@@ -112,8 +113,8 @@ int main(void)
             if (fds[i].fd == -1)
                 continue;
 
-            nrecv = recv(fds[i].fd, buf, STREAM_LIMIT, 0);
-            assert(nrecv >= 0);
+            nrecv = recv(fds[i].fd, buf, bufArena->pos, 0);
+            assert(nrecv != -1);
 
             if (nrecv == 0) {
                 fprintf(stdout, "disconnected(%d). \n", fds[i].fd - serverfd);
@@ -123,8 +124,21 @@ int main(void)
                 continue;
             }
 
+            recv_len = sizeof(*mbuf) - sizeof(mbuf->text) + mbuf->text_len * sizeof(*mbuf->text);
+            if (recv_len > nrecv) {
+                // allocate needed space for buf
+                if (recv_len > bufArena->pos)
+                    ArenaPush(bufArena, recv_len - bufArena->pos);
+
+                // receive remaining bytes
+                u32 nr = recv(fds[i].fd, buf + nrecv, recv_len - nrecv, 0);
+                assert(nr != -1);
+                nrecv += nr;
+                assert(nrecv == recv_len);
+            }
+
             // TODO: Do not print the message in the logs
-            fprintf(stdout, "message(%d): %d bytes.\n", fds[i].fd - serverfd, nrecv); 
+            fprintf(stdout, "message(%d): %d bytes.\n", fds[i].fd - serverfd, nrecv);
 
             for (u32 j = FDS_CLIENTS; j < (FDS_SIZE); j++) {
                 if (j == i)
