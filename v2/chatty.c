@@ -27,29 +27,221 @@ enum { FDS_SERVER = 0,
        FDS_RESIZE,
        FDS_MAX };
 
-void *thread_reconnect(void *ptr);
+void *thread_reconnect(void *address_ptr);
 void fillstr(wchar_t *str, wchar_t ch, u32 len);
 void popup(u32 fg, u32 bg, char *text);
 u32 tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, wchar_t *text, u32 fg_pfx, u32 bg_pfx, char *pfx, s32 limit);
 void screen_home(Arena *msgsArena, wchar_t input[]);
 
-// When the server sends a disconnect message this function must be called with the fds struct as
-// paramter.  To indicate that the server is offline the fds[FDS_SERVER] is set to -1.  When online
-// it is set to a non-zero value.
-// TODO: in screen_home / status bar put the disconnected state
-void *thread_reconnect(void *ptr)
+int main(int argc, char **argv)
 {
-    u32 serverfd, err;
+    // Use first argument as username
+    if (argc > 1) {
+        u32 arg_len = strlen(argv[1]);
+        assert(arg_len <= AUTHOR_LEN - 1);
+        memcpy(username, argv[1], arg_len);
+        username[arg_len] = '\0';
+    }
+
+    s32 err, serverfd, ttyfd, resizefd, nsend;
+    setlocale(LC_ALL, ""); /* Fix unicode handling */
+
     const struct sockaddr_in address = {
         AF_INET,
         htons(PORT),
         {0},
     };
 
+    serverfd = socket(AF_INET, SOCK_STREAM, 0);
+    assert(serverfd > 2); // greater than STDERR
+
+    err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
+    if (err != 0) {
+        perror("Server");
+        return 1;
+    }
+
+    tb_init();
+    tb_get_fds(&ttyfd, &resizefd);
+
+    // poopoo C cannot infer type
+    fds = (struct pollfd[FDS_MAX]){
+        {serverfd, POLLIN, 0},
+        {   ttyfd, POLLIN, 0},
+        {resizefd, POLLIN, 0},
+    };
+
+    Arena *msgsArena = ArenaAlloc();
+    // Message *messages = msgsArena->memory; // helper pointer, for indexing memory
+    Arena *msgTextArena = ArenaAlloc();
+    u32 nrecv = 0;
+    // buffer used for receiving and sending messages
+    u8 buf[STREAM_BUF] = {0};
+    Message *mbuf = (Message *)buf;
+
+    wchar_t input[256] = {0};
+    u32 input_len = 0;
+    struct tb_event ev;
+    char *errmsg = NULL;
+
+    // Display loop
+    screen_home(msgsArena, input);
+    tb_present();
+
+    u8 quit = 0;
+    while (!quit) {
+        err = poll(fds, FDS_MAX, TIMEOUT_POLL);
+        // ignore resize events and use them to redraw the screen
+        assert(err != -1 || errno == EINTR);
+
+        tb_clear();
+
+        if (fds[FDS_SERVER].revents & POLLIN) {
+            // got data from server
+            u8 timestamp[TIMESTAMP_LEN];
+            message_timestamp(timestamp);
+
+            nrecv = recv(fds[FDS_SERVER].fd, buf, STREAM_LIMIT, 0);
+            assert(nrecv != -1);
+
+            // TODO: Handle this in a thread, the best way would be
+            // -> server disconnect info (somewhere, for now popup)
+            // -> user can still view messages, exit & type but not send
+            // -> try to reconnect in background
+            if (nrecv == 0) {
+                // close diconnected server's socket
+                err = close(fds[FDS_SERVER].fd);
+                assert(err == 0);
+                fds[FDS_SERVER].fd = -1; // ignore
+                // start trying to reconnect in a thread
+                pthread_t t;
+                err = pthread_create(&t, NULL, &thread_reconnect, (void*)&address);
+                assert(err == 0);
+
+            } else {
+                Message *buf_msg = (Message *)buf; // helper for indexing memory
+                Message *recvmsg = ArenaPush(msgsArena, sizeof(Message));
+                // copy everything but the text
+                memcpy(recvmsg, buf, AUTHOR_LEN + TIMESTAMP_LEN + sizeof(buf_msg->text_len));
+                // allocate memeory for text
+                recvmsg->text = ArenaPush(msgTextArena, recvmsg->text_len * sizeof(wchar_t));
+                // copy the text to the allocated space
+                memcpy(recvmsg->text, buf + TIMESTAMP_LEN + AUTHOR_LEN + sizeof(recvmsg->text_len), recvmsg->text_len * sizeof(wchar_t));
+            }
+        }
+
+        if (fds[FDS_TTY].revents & POLLIN) {
+            // got a key event
+            tb_poll_event(&ev);
+
+            switch (ev.key) {
+            case TB_KEY_CTRL_W:
+                // delete consecutive whitespace
+                while (input_len) {
+                    if (input[input_len - 1] == L' ') {
+                        input[input_len - 1] = 0;
+                        input_len--;
+                        continue;
+                    }
+                    break;
+                }
+                // delete until whitespace
+                while (input_len) {
+                    if (input[input_len - 1] == L' ')
+                        break;
+                    // erase
+                    input[input_len - 1] = 0;
+                    input_len--;
+                }
+                break;
+            case TB_KEY_CTRL_D:
+            case TB_KEY_CTRL_C:
+                quit = 1;
+                break;
+            case TB_KEY_CTRL_M: // send message
+                if (input_len == 0)
+                    // do not send empty message
+                    break;
+                if (fds[FDS_SERVER].fd == -1)
+                    // do not send message to disconnected server
+                    break;
+
+                // null terminate
+                input[input_len] = 0;
+                input_len++;
+                // TODO: check size does not exceed buffer
+
+                // add to msgsArena
+                Message *sendmsg = ArenaPush(msgsArena, sizeof(Message));
+                memcpy(sendmsg->author, username, AUTHOR_LEN);
+                message_timestamp(sendmsg->timestamp);
+                sendmsg->text_len = input_len;
+                sendmsg->text = ArenaPush(msgTextArena, input_len * sizeof(wchar_t));
+                // copy the text to the allocated space
+                memcpy(sendmsg->text, input, input_len * sizeof(wchar_t));
+
+                // Send the message
+                // copy everything but the text
+                memcpy(buf, sendmsg, AUTHOR_LEN + TIMESTAMP_LEN + sizeof(wchar_t));
+                memcpy(&mbuf->text, input, input_len * sizeof(wchar_t));
+                nsend = send(fds[FDS_SERVER].fd, buf, AUTHOR_LEN + TIMESTAMP_LEN + input_len * sizeof(wchar_t), 0);
+                assert(nsend > 0);
+
+            case TB_KEY_CTRL_U: // clear input
+                bzero(input, input_len * sizeof(wchar_t));
+                input_len = 0;
+                break;
+            default:
+                assert(ev.ch >= 0);
+                if (ev.ch == 0)
+                    break;
+                // append key to input buffer
+                // TODO: check size does not exceed buffer
+                input[input_len] = ev.ch;
+                input_len++;
+
+                break;
+            }
+            if (quit)
+                break;
+        }
+
+        // These are used to redraw the screen from threads
+        if (fds[FDS_RESIZE].revents & POLLIN) {
+            // ignore
+            tb_poll_event(&ev);
+        }
+
+        screen_home(msgsArena, input);
+
+        tb_present();
+    }
+
+    tb_shutdown();
+
+    if (errmsg != NULL)
+        printf("%s\n", errmsg);
+
+    ArenaRelease(msgTextArena);
+    ArenaRelease(msgsArena);
+
+    return 0;
+}
+
+// Takes as paramter `struct sockaddr_in*` and uses it to connect to the server.
+// When the server sends a disconnect message this function must be called with the fds struct as
+// paramter.  To indicate that the server is offline the fds[FDS_SERVER] is set to -1.  When online
+// it is set to a non-zero value.
+// Returns NULL.
+void *thread_reconnect(void *address_ptr)
+{
+    u32 serverfd, err;
+    struct sockaddr_in *address = address_ptr;
+
     while (1) {
         serverfd = socket(AF_INET, SOCK_STREAM, 0);
         assert(serverfd > 2); // greater than STDERR
-        err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
+        err = connect(serverfd, (struct sockaddr *)address, sizeof(*address));
         if (err == 0)
             break;
         assert(errno == ECONNREFUSED);
@@ -296,197 +488,3 @@ void screen_home(Arena *msgsArena, wchar_t input[])
     }
 }
 
-int main(int argc, char **argv)
-{
-    // Use first argument as username
-    if (argc > 1) {
-        u32 arg_len = strlen(argv[1]);
-        assert(arg_len <= AUTHOR_LEN - 1);
-        memcpy(username, argv[1], arg_len);
-        username[arg_len] = '\0';
-    }
-
-    s32 err, serverfd, ttyfd, resizefd, nsend;
-    setlocale(LC_ALL, ""); /* Fix unicode handling */
-
-    const struct sockaddr_in address = {
-        AF_INET,
-        htons(PORT),
-        {0},
-    };
-
-    serverfd = socket(AF_INET, SOCK_STREAM, 0);
-    assert(serverfd > 2); // greater than STDERR
-
-    err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
-    if (err != 0) {
-        perror("Server");
-        return 1;
-    }
-
-    tb_init();
-    tb_get_fds(&ttyfd, &resizefd);
-
-    // poopoo C cannot infer type
-    fds = (struct pollfd[FDS_MAX]){
-        {serverfd, POLLIN, 0},
-        {   ttyfd, POLLIN, 0},
-        {resizefd, POLLIN, 0},
-    };
-
-    Arena *msgsArena = ArenaAlloc();
-    // Message *messages = msgsArena->memory; // helper pointer, for indexing memory
-    Arena *msgTextArena = ArenaAlloc();
-    u32 nrecv = 0;
-    // buffer used for receiving and sending messages
-    u8 buf[STREAM_BUF] = {0};
-    Message *mbuf = (Message *)buf;
-
-    wchar_t input[256] = {0};
-    u32 input_len = 0;
-    struct tb_event ev;
-    char *errmsg = NULL;
-
-    // Display loop
-    screen_home(msgsArena, input);
-    tb_present();
-
-    u8 quit = 0;
-    while (!quit) {
-        err = poll(fds, FDS_MAX, TIMEOUT_POLL);
-        // ignore resize events and use them to redraw the screen
-        assert(err != -1 || errno == EINTR);
-
-        tb_clear();
-
-        if (fds[FDS_SERVER].revents & POLLIN) {
-            // got data from server
-            u8 timestamp[TIMESTAMP_LEN];
-            message_timestamp(timestamp);
-
-            nrecv = recv(fds[FDS_SERVER].fd, buf, STREAM_LIMIT, 0);
-            assert(nrecv != -1);
-
-            // TODO: Handle this in a thread, the best way would be
-            // -> server disconnect info (somewhere, for now popup)
-            // -> user can still view messages, exit & type but not send
-            // -> try to reconnect in background
-            if (nrecv == 0) {
-                // close diconnected server's socket
-                err = close(fds[FDS_SERVER].fd);
-                assert(err == 0);
-                fds[FDS_SERVER].fd = -1; // ignore
-                // start trying to reconnect in a thread
-                pthread_t t;
-                err = pthread_create(&t, NULL, &thread_reconnect, fds);
-                assert(err == 0);
-
-            } else {
-                Message *buf_msg = (Message *)buf; // helper for indexing memory
-                Message *recvmsg = ArenaPush(msgsArena, sizeof(Message));
-                // copy everything but the text
-                memcpy(recvmsg, buf, AUTHOR_LEN + TIMESTAMP_LEN + sizeof(buf_msg->text_len));
-                // allocate memeory for text
-                recvmsg->text = ArenaPush(msgTextArena, recvmsg->text_len * sizeof(wchar_t));
-                // copy the text to the allocated space
-                memcpy(recvmsg->text, buf + TIMESTAMP_LEN + AUTHOR_LEN + sizeof(recvmsg->text_len), recvmsg->text_len * sizeof(wchar_t));
-            }
-        }
-
-        if (fds[FDS_TTY].revents & POLLIN) {
-            // got a key event
-            tb_poll_event(&ev);
-
-            switch (ev.key) {
-            case TB_KEY_CTRL_W:
-                // delete consecutive whitespace
-                while (input_len) {
-                    if (input[input_len - 1] == L' ') {
-                        input[input_len - 1] = 0;
-                        input_len--;
-                        continue;
-                    }
-                    break;
-                }
-                // delete until whitespace
-                while (input_len) {
-                    if (input[input_len - 1] == L' ')
-                        break;
-                    // erase
-                    input[input_len - 1] = 0;
-                    input_len--;
-                }
-                break;
-            case TB_KEY_CTRL_D:
-            case TB_KEY_CTRL_C:
-                quit = 1;
-                break;
-            case TB_KEY_CTRL_M: // send message
-                if (input_len == 0)
-                    // do not send empty message
-                    break;
-                if (fds[FDS_SERVER].fd == -1)
-                    // do not send message to disconnected server
-                    break;
-
-                // null terminate
-                input[input_len] = 0;
-                input_len++;
-                // TODO: check size does not exceed buffer
-
-                // add to msgsArena
-                Message *sendmsg = ArenaPush(msgsArena, sizeof(Message));
-                memcpy(sendmsg->author, username, AUTHOR_LEN);
-                message_timestamp(sendmsg->timestamp);
-                sendmsg->text_len = input_len;
-                sendmsg->text = ArenaPush(msgTextArena, input_len * sizeof(wchar_t));
-                // copy the text to the allocated space
-                memcpy(sendmsg->text, input, input_len * sizeof(wchar_t));
-
-                // Send the message
-                // copy everything but the text
-                memcpy(buf, sendmsg, AUTHOR_LEN + TIMESTAMP_LEN + sizeof(wchar_t));
-                memcpy(&mbuf->text, input, input_len * sizeof(wchar_t));
-                nsend = send(fds[FDS_SERVER].fd, buf, AUTHOR_LEN + TIMESTAMP_LEN + input_len * sizeof(wchar_t), 0);
-                assert(nsend > 0);
-
-            case TB_KEY_CTRL_U: // clear input
-                bzero(input, input_len * sizeof(wchar_t));
-                input_len = 0;
-                break;
-            default:
-                assert(ev.ch >= 0);
-                if (ev.ch == 0)
-                    break;
-                // append key to input buffer
-                // TODO: check size does not exceed buffer
-                input[input_len] = ev.ch;
-                input_len++;
-
-                break;
-            }
-            if (quit)
-                break;
-        }
-
-        // These are used to redraw the screen from threads
-        if (fds[FDS_RESIZE].revents & POLLIN) {
-            // ignore
-            tb_poll_event(&ev);
-        }
-
-        screen_home(msgsArena, input);
-
-        tb_present();
-    }
-
-    tb_shutdown();
-
-    if (errmsg != NULL)
-        printf("%s\n", errmsg);
-
-    ArenaRelease(msgTextArena);
-    ArenaRelease(msgsArena);
-
-    return 0;
-}
