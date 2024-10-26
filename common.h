@@ -13,12 +13,11 @@
 #define TIMESTAMP_LEN 9
 // port to listen on
 #define PORT 9983
-// buffer size for holding data received from recv()
-// TODO: choose a good size
-#define STREAM_BUF 1024
-// max data received in one recv() call on serverfd
-// TODO: choose a good size
-#define STREAM_LIMIT 1024
+// How much bytes can be sent at once over the stream
+// This is also Intial size for buffer used to send and receive data,
+// "initial" because the buffer is tied to an arena and can grow.
+// Note: must be greater than sizeof(Message) - sizeof(Message.text)
+#define STREAM_LIMIT 64
 
 typedef uint8_t u8;
 typedef uint16_t u16;

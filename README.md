@@ -14,6 +14,8 @@ The idea is the following:
 - [x] bug: do not allow sending empty message
 - [x] wrapping messages
 - [x] bug: when sending message after diconnect (serverfd?)
+- [x] Handle disconnection thiin a thread, the best way would be
+- [ ] ctrl+z to suspend
 
 ## server
 - [ ] log messages to file (save history)
@@ -21,7 +23,7 @@ The idea is the following:
 - [ ] timeout on recv?
 
 ## common
-- [ ] handle messages that are too large
+- [x] handle messages that are too large
 - [ ] connect/disconnections messages
 - [ ] use IP address / domain
 - [ ] chat history
@@ -56,7 +58,6 @@ Notice, that this depends on knowing the text's length before allocating the mem
 - `Ctrl+C` | `Ctrl+D`: quits
 - `Ctrl+U`: Erase input line
 - `Ctrl+W`: Erase word behind cursor
-
 
 ## Resources I used for building this
 - source code I looked at:
