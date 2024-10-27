@@ -18,20 +18,23 @@ The idea is the following:
 - [ ] ctrl+z to suspend
 
 ## server
-- [ ] log messages to file (save history)
 - [ ] check if when sending and the client is offline (due to connection loss) what happens
 - [ ] timeout on recv?
+- [ ] use threads to handle clients/ timeout when receiving because a client could theoretically
+  stall the entire server.
 
 ## common
 - [x] handle messages that are too large
+- [ ] log messages to file (save history)
 - [ ] connect/disconnections messages
 - [ ] use IP address / domain
 - [ ] chat history
+- [ ] asserting, logging if fail / halt execution
 
 ## Protocol
-For now the protocol consists of sending Message type over the network, but in the future something
-more flexible might be required.  Because it will make it easier to do things like:
-- request chat logs up to a certain point
+- see `protocol.h` for more info
+- [ ] make sections per message
+- request chat logs from a certain point up to now (history)
 - connect to a specific room
 - connect/disconnect messages
 
