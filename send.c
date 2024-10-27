@@ -7,17 +7,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "arena.h"
-#include "common.h"
+#include "chatty.h"
 
-int main(int argc, char **argv)
+int
+main(int argc, char** argv)
 {
     if (argc < 3) {
         fprintf(stderr, "usage: send <author> <msg>\n");
         return 1;
     }
 
-    u32 err, serverfd, nsend;
+    s32 err, serverfd, nsend;
 
     serverfd = socket(AF_INET, SOCK_STREAM, 0);
     assert(serverfd != -1);
@@ -27,37 +27,41 @@ int main(int argc, char **argv)
         htons(PORT),
         {0},
     };
-    err = connect(serverfd, (struct sockaddr *)&address, sizeof(address));
+    err = connect(serverfd, (struct sockaddr*)&address, sizeof(address));
     assert(err == 0);
 
-    u32 author_len = strlen(argv[1]); // add 1 for null terminator
-    assert(author_len + 1 <= AUTHOR_LEN);
+    HeaderMessage header = HEADER_TEXTMESSAGE;
+    TextMessage* message;
 
     // convert text to wide string
     u32 text_len = strlen(argv[2]) + 1;
-    wchar_t text_wide[text_len];
-    u32 size = mbstowcs(text_wide, argv[2], text_len - 1);
+    u32 text_wide[text_len];
+    u32 size = mbstowcs((wchar_t*)text_wide, argv[2], text_len - 1);
     assert(size == text_len - 1);
-    // null terminate
     text_wide[text_len - 1] = 0;
 
-    Arena *bufArena = ArenaAlloc();
-    u8 *buf = ArenaPush(bufArena, (text_len - 1) * sizeof(*text_wide));
-    Message *mbuf = (Message *)buf;
+    u32 author_len = strlen(argv[1]);
+    assert(author_len + 1 <= AUTHOR_LEN); // add 1 for null terminator
 
-    memcpy(mbuf->author, argv[1], author_len);
-    message_timestamp(mbuf->timestamp);
-    mbuf->text_len = text_len;
-    memcpy(&mbuf->text, text_wide, mbuf->text_len * sizeof(wchar_t));
+    u8 buf[text_len * sizeof(*text_wide) + TEXTMESSAGE_SIZE];
+    bzero(buf, sizeof(buf));
+    message = (TextMessage*)buf;
 
-    nsend = send(serverfd, buf, MESSAGELENP(mbuf), 0);
+    memcpy(message->author, argv[1], author_len);
+    message->timestamp = time(NULL);
+    message->len = text_len;
+    memcpy(&message->text, text_wide, text_len * sizeof(*message->text));
 
-    assert(nsend >= 0);
+    nsend = send(serverfd, &header, sizeof(header), 0);
+    assert(nsend != -1);
+    printf("header bytes sent: %d\n", nsend);
+    nsend = send(serverfd, buf, sizeof(buf), 0);
+    assert(nsend != -1);
 
-    printf("text_len: %d\n", text_len);
-    fprintf(stdout, "Sent %d bytes.\n", nsend);
-
-    ArenaRelease(bufArena);
+    printf("text length: %d\n", text_len);
+    printf("buf size: %lu\n", sizeof(buf));
+    printf("text size: %lu\n", sizeof(*text_wide) * text_len);
+    printf("message bytes sent: %d\n", nsend);
 
     return 0;
 }
