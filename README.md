@@ -22,6 +22,8 @@ The idea is the following:
 - [ ] timeout on recv?
 - [ ] use threads to handle clients/ timeout when receiving because a client could theoretically
   stall the entire server.
+- [ ] do not crash on errors from clients
+    - implement error message?
 
 ## common
 - [x] handle messages that are too large

@@ -471,6 +471,13 @@ main(int argc, char** argv)
                     ninput--;
                 }
                 break;
+            case TB_KEY_CTRL_Z: {
+                pid_t pid = getpid();
+                tb_shutdown();
+                kill(pid, SIGSTOP);
+                tb_init();
+            } break;
+
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
                 quit = 1;
