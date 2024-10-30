@@ -79,7 +79,7 @@ thread_reconnect(void* address_ptr)
     return NULL;
 }
 
-// Print `text` wrapped to limit. x, y, fg and
+// Print `text` wrapped to limit_x.  It will print no more than limit_y lines.  x, y, fg and
 // bg will be passed to the tb_printf() function calls.
 // pfx is a string that will be printed first and will not be wrapped on characters like msg->text,
 // this is useful when for example: printing messages and wanting to have consistent
@@ -91,16 +91,16 @@ thread_reconnect(void* address_ptr)
 // - no this should be a separate function
 // TODO: check if text[i] goes out of bounds
 u32
-tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx, u32 bg_pfx, u8* pfx, s32 limit)
+tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx, u32 bg_pfx, u8* pfx, s32 limit_x, u32 limit_y)
 {
-    assert(limit > 0);
+    assert(limit_x > 0);
 
     // lines y, incremented after each wrap
     s32 ly = y;
     // character the text is split on
     u32 t = 0;
     // index used for searching in string
-    s32 i = limit;
+    s32 i = limit_x;
     // previous i for windowing through the text
     s32 offset = 0;
     // used when retrying to get a longer limit
@@ -113,7 +113,7 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
         // If the text fits on one line print the text and return
         // Otherwise print the text on the next line
         s32 pfx_len = strlen((char*)pfx);
-        if (limit > pfx_len + text_len) {
+        if (limit_x > pfx_len + text_len) {
             tb_printf(x + pfx_len, y, fg, bg, "%ls", text);
             return 1;
         } else {
@@ -136,7 +136,7 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
     // 8. step 2. until i >= text_len
     // 9. print remaining part of the string
 
-    while (i < text_len) {
+    while (i < text_len && ly - y < limit_y) {
         // search backwards for whitespace
         while (i > offset && text[i] != L' ')
             i--;
@@ -145,7 +145,7 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
         if (i == offset) {
             offset = i;
             failed++;
-            i += limit + failed * limit;
+            i += limit_x + failed * limit_x;
             continue;
         } else {
             failed = 0;
@@ -160,10 +160,12 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
         ly++;
 
         offset = i;
-        i += limit;
+        i += limit_x;
     }
-    tb_printf(x, ly, fg, bg, "%ls", text + offset);
-    ly++;
+    if ((u32)ly <= limit_y) {
+        tb_printf(x, ly, fg, bg, "%ls", text + offset);
+        ly++;
+    }
 
     return ly - y;
 }
@@ -198,8 +200,8 @@ screen_home(Arena* msgsArena, u32 nmessages, u32 input[], u32 input_len)
     //  you doing?
     //  03:24:33 [TlasT] I am fine
     {
-        u32 freesp = global.height - box_height;
-        if (freesp <= 0)
+        u32 free_y = global.height - box_height;
+        if (free_y <= 0)
             goto draw_prompt;
 
         u8* addr = msgsArena->addr;
@@ -207,10 +209,32 @@ screen_home(Arena* msgsArena, u32 nmessages, u32 input[], u32 input_len)
         // on what line to print the current message, used for scrolling
         u32 msg_y = 0;
 
-        u32 offs = (nmessages > freesp) ? nmessages - freesp : 0;
+        u32 offs = (nmessages > free_y) ? nmessages - free_y : 0;
+        // skip offs ccount messages
+        for (u32 i = 0; i < offs; i++) {
+            HeaderMessage* header = (HeaderMessage*)addr;
+            addr += sizeof(*header);
+            switch (header->type) {
+            case HEADER_TYPE_TEXT: {
+                TextMessage* message = (TextMessage*)addr;
+                addr += TEXTMESSAGE_SIZE;
+                addr += message->len * sizeof(*message->text);
+                break;
+            }
+            case HEADER_TYPE_PRESENCE:
+                addr += sizeof(PresenceMessage);
+                break;
+            case HEADER_TYPE_HISTORY:
+                addr += sizeof(HistoryMessage);
+                break;
+            default:
+                // unhandled message type
+                assert(0);
+            }
+        }
 
         // In each case statement advance the addr pointer by the size of the message
-        for (u32 i = offs; i < nmessages; i++) {
+        for (u32 i = offs; i < nmessages && msg_y < free_y; i++) {
             HeaderMessage* header = (HeaderMessage*)addr;
             addr += sizeof(*header);
 
@@ -229,7 +253,8 @@ screen_home(Arena* msgsArena, u32 nmessages, u32 input[], u32 input_len)
                 u8 timestamp[TIMESTAMP_LEN];
                 formatTimestamp(timestamp, message->timestamp);
                 sprintf((char*)pfx, "%s [%s] ", timestamp, message->author);
-                msg_y += tb_printf_wrap(0, msg_y, TB_WHITE, 0, (u32*)&message->text, message->len, fg, 0, pfx, global.width);
+                // TODO: y_limit
+                msg_y += tb_printf_wrap(0, msg_y, TB_WHITE, 0, (u32*)&message->text, message->len, fg, 0, pfx, global.width, free_y - msg_y);
 
                 u32 message_size = TEXTMESSAGE_SIZE + message->len * sizeof(*message->text);
                 addr += message_size;
