@@ -23,11 +23,127 @@ enum { FDS_STDIN = 0,
 
 // Has information on clients
 // For each pollfd in fds there should be a matching client in clients
-// clients[i - FDS_CLIENTS] <=> fds[i]
+// clients[i] <=> fds[i]
 typedef struct {
     u8 author[AUTHOR_LEN]; // matches author property on other message types
     Bool initialized;      // boolean
 } Client;
+
+// Send anyMessage to all clients in fds from fdsArena except for fds[i].
+void
+sendToOthers(Arena* fdsArena, struct pollfd* fds, u32 i, HeaderMessage* header, void* anyMessage)
+{
+    s32 nsend;
+    for (u32 j = FDS_CLIENTS; j < FDS_SIZE; j++) {
+        if (fds[j].fd == fds[i].fd) continue;
+        if (fds[j].fd == -1) continue;
+
+        // send header
+        u32 nsend_total = 0;
+        nsend = send(fds[j].fd, header, sizeof(*header), 0);
+        assert(nsend != -1);
+        assert(nsend == sizeof(*header));
+        nsend_total += nsend;
+
+        // send message
+        switch (header->type) {
+        case HEADER_TYPE_PRESENCE: {
+            PresenceMessage* message = (PresenceMessage*)anyMessage;
+            nsend = send(fds[j].fd, message, sizeof(*message), 0);
+            assert(nsend != -1);
+            assert(nsend == sizeof(*message));
+            fprintf(stdout, "  Notifying(%d->%d).\n", fds[i].fd, fds[j].fd);
+            break;
+        }
+        case HEADER_TYPE_TEXT: {
+            TextMessage* message = (TextMessage*)anyMessage;
+            nsend = send(fds[j].fd, message, TEXTMESSAGE_SIZE, 0);
+            assert(nsend != -1);
+            assert(nsend == TEXTMESSAGE_SIZE);
+            nsend_total += nsend;
+            nsend = send(fds[j].fd, &message->text, message->len * sizeof(*message->text), 0);
+            assert(nsend != -1);
+            assert(nsend == (message->len * sizeof(*message->text)));
+            nsend_total += nsend;
+            break;
+        }
+        default:
+            fprintf(stdout, "  Cannot retransmit %s\n", headerTypeString(header->type));
+        }
+
+        fprintf(stdout, "  Retransmitted(%d->%d) %d bytes.\n", fds[i].fd, fds[j].fd, nsend_total);
+    }
+}
+
+void
+disconnect(Arena* fdsArena, struct pollfd* fds, u32 i, Client* client)
+{
+    fprintf(stdout, "Disconnected(%d). \n", fds[i].fd);
+    shutdown(fds[i].fd, SHUT_RDWR);
+    close(fds[i].fd); // send close to client
+
+    // Send disconnection to other connected clients
+    HeaderMessage header = HEADER_PRESENCEMESSAGE;
+    PresenceMessage message = {
+        .type = PRESENCE_TYPE_DISCONNECTED
+    };
+    memcpy(message.author, client->author, AUTHOR_LEN);
+    sendToOthers(fdsArena, fds, i, &header, &message);
+
+    fds[i].fd = -1;              // ignore in the future
+    client->initialized = False; // deinitialize client
+}
+
+// Initialize a client that connects for the first time or reconnects.
+// Receive HeaderMessage and PresenceMessage from fd and set client with the data from
+// PresenceMessage.
+// Notify fds in fdsArena.
+// TODO: handle wrong messages
+void
+initClient(Arena* fdsArena, struct pollfd* fds, s32 fd, Client* client)
+{
+    s32 nrecv = 0;
+    s32 nsend = 0;
+
+    fprintf(stdout, " Adding to clients(%d).\n", fd);
+
+    HeaderMessage header;
+    nrecv = recv(fd, &header, sizeof(header), 0);
+    assert(nrecv != -1);
+    assert(nrecv == sizeof(header));
+    if (header.type != HEADER_TYPE_PRESENCE) {
+        // reject connection
+        close(fd);
+        fprintf(stdout, "  Got wrong header(%d).\n", fd);
+        return;
+    }
+    fprintf(stdout, "  Got header(%d).\n", fd);
+
+    PresenceMessage message;
+    nrecv = recv(fd, &message, sizeof(message), 0);
+    assert(nrecv != -1);
+    assert(nrecv == sizeof(message));
+    fprintf(stdout, "  Got presence message(%d).\n", fd);
+
+    // Copy author from PresenceMessage.
+    memcpy(client->author, message.author, AUTHOR_LEN);
+
+    // Notify other clients from this new one
+    // Reuse header and message
+    for (u32 j = FDS_CLIENTS; j < FDS_SIZE; j++) {
+        if (fds[j].fd == fd)
+            continue;
+        if (fds[j].fd == -1)
+            continue;
+        fprintf(stdout, "  Notifying(%d->%d).\n", fd, fds[j].fd);
+        nsend = send(fds[j].fd, &header, sizeof(header), 0);
+        assert(nsend != -1);
+        assert(nsend == sizeof(header));
+        nsend = send(fds[j].fd, &message, sizeof(message), 0);
+        assert(nsend != -1);
+        assert(nsend == sizeof(message));
+    }
+}
 
 int
 main(void)
@@ -59,7 +175,6 @@ main(void)
     Arena* msgsArena = ArenaAlloc(Megabytes(128)); // storing received messages
                                                    // NOTE: sent messages?
     s32 nrecv = 0;                                 // number of bytes received
-    s32 nsend = 0;                                 // number of bytes sent
 
     Arena* clientsArena = ArenaAlloc(MAX_CONNECTIONS * sizeof(Client));
     Arena* fdsArena = ArenaAlloc(MAX_CONNECTIONS * sizeof(struct pollfd));
@@ -96,20 +211,21 @@ main(void)
             assert(clientfd > serverfd);
             fprintf(stdout, "New connection(%d).\n", clientfd);
 
-            // fill up a hole
+            // If there is a slot in fds with fds[found].fd == -1 use it instead, otherwise allocate
+            // some space on the arena.
             u8 found;
             for (found = FDS_CLIENTS; found < FDS_SIZE; found++)
                 if (fds[found].fd == -1)
                     break;
-            if (found == FDS_SIZE) {
+            if (found == MAX_CONNECTIONS) {
+                // TODO: reject connection
+                close(clientfd);
+                fprintf(stdout, "Max clients reached.");
+            } else if (found == FDS_SIZE) {
                 // no more space, allocate
                 struct pollfd* pollfd = ArenaPush(fdsArena, sizeof(*pollfd));
                 pollfd->fd = clientfd;
                 pollfd->events = POLLIN;
-            } else if (found == MAX_CONNECTIONS) {
-                // TODO: reject connection
-                close(clientfd);
-                fprintf(stdout, "Max clients reached.");
             } else {
                 // hole found
                 fds[found].fd = clientfd;
@@ -119,58 +235,18 @@ main(void)
         }
 
         // Check for messages from clients
-        for (u32 i = FDS_CLIENTS; i < (FDS_SIZE); i++) {
+        for (u32 i = FDS_CLIENTS; i < FDS_SIZE; i++) {
             if (!(fds[i].revents & POLLIN))
                 continue;
             assert(fds[i].fd != -1);
-
             fprintf(stdout, "Message(%d).\n", fds[i].fd);
-            // If this is the first message from the client it must be a presence message indicated
-            // it connected.
-            Client* client = clients + i - FDS_CLIENTS;
+            Client* client = clients + i;
+
+            // Initialize the client if this is the first time
             if (!client->initialized) {
-                fprintf(stdout, " Adding to clients(%d).\n", fds[i].fd);
-                // Wait for PresenceMessage from new client to get author information
-                HeaderMessage header;
-                // TODO: handle wrong message, disconnection, etc.
-                nrecv = recv(clientfd, &header, sizeof(header), 0);
-                assert(nrecv != -1);
-                assert(nrecv == sizeof(header));
-                if (header.type != HEADER_TYPE_PRESENCE) {
-                    // TODO: reject connection
-                    close(clientfd);
-                    continue;
-                }
-                fprintf(stdout, "  Got header(%d).\n", fds[i].fd);
-
-                PresenceMessage message;
-                // TODO: handle wrong message
-                nrecv = recv(clientfd, &message, sizeof(message), 0);
-                assert(nrecv != -1);
-                assert(nrecv == sizeof(message));
-                fprintf(stdout, "  Got presence message(%d).\n", fds[i].fd);
-
-                memcpy(client->author, message.author, AUTHOR_LEN);
+                initClient(fdsArena, fds, fds[i].fd, client);
                 client->initialized = True;
-
                 fprintf(stdout, "  Added to clients(%d): %s\n", fds[i].fd, client->author);
-
-                // Notify other clients from this new one
-                // Reuse header and message
-                for (u32 j = FDS_CLIENTS; j < (FDS_SIZE); j++) {
-                    if (fds[j].fd == fds[i].fd)
-                        continue;
-                    if (fds[j].fd == -1)
-                        continue;
-                    fprintf(stdout, "  Notifying (%d)\n", fds[j].fd);
-
-                    nsend = send(fds[j].fd, &header, sizeof(header), 0);
-                    assert(nsend != -1);
-                    assert(nsend == sizeof(header));
-                    nsend = send(fds[j].fd, &message, sizeof(message), 0);
-                    assert(nsend != -1);
-                    assert(nsend == sizeof(message));
-                }
                 continue;
             }
 
@@ -180,31 +256,7 @@ main(void)
             assert(nrecv != -1);
 
             if (nrecv == 0) {
-                fprintf(stdout, "Disconnected(%d). \n", fds[i].fd);
-                shutdown(fds[i].fd, SHUT_RDWR);
-                close(fds[i].fd);                             // send close to client
-                fds[i].fd = -1;                               // ignore in the future
-                clients[i - FDS_CLIENTS].initialized = False; // deinitialize client
-                                                              //
-                // Send disconnection to other connected clients
-                HeaderMessage header = HEADER_PRESENCEMESSAGE;
-                PresenceMessage message = {
-                    .type = PRESENCE_TYPE_DISCONNECTED
-                };
-                memcpy(message.author, clients[i - FDS_CLIENTS].author, AUTHOR_LEN);
-                for (u32 j = FDS_CLIENTS; j < FDS_SIZE; j++) {
-                    if (fds[j].fd == fds[i].fd)
-                        continue;
-                    if (fds[j].fd == -1)
-                        continue;
-                    nsend = send(fds[j].fd, &header, sizeof(header), 0);
-                    assert(nsend != -1);
-                    assert(nsend == sizeof(header));
-                    nsend = send(fds[j].fd, &message, sizeof(message), 0);
-                    assert(nsend != -1);
-                    assert(nsend == sizeof(message));
-                }
-
+                disconnect(fdsArena, fds, i, (clients + i));
                 continue;
             }
 
@@ -218,30 +270,9 @@ main(void)
                 fprintf(stderr, " Received(%d): %d bytes -> ", fds[i].fd, nrecv);
                 printTextMessage(message, 0);
 
-                HeaderMessage header = HEADER_TEXTMESSAGE;
                 // Send message to all other clients
-                for (u32 j = FDS_CLIENTS; j < FDS_SIZE; j++) {
-                    if (fds[j].fd == fds[i].fd) continue;
-                    if (fds[j].fd == -1) continue;
+                sendToOthers(fdsArena, fds, i, &header, message);
 
-                    // NOTE: I wonder if this is more expensive than constructing a buffer and sending
-                    // that
-                    u32 nsend_total = 0;
-                    nsend = send(fds[j].fd, &header, sizeof(header), 0);
-                    assert(nsend != 1);
-                    assert(nsend == sizeof(header));
-                    nsend_total += nsend;
-                    nsend = send(fds[j].fd, message, TEXTMESSAGE_SIZE, 0);
-                    assert(nsend != -1);
-                    assert(nsend == TEXTMESSAGE_SIZE);
-                    nsend_total += nsend;
-                    nsend = send(fds[j].fd, &message->text, message->len * sizeof(*message->text), 0);
-                    assert(nsend != -1);
-                    assert(nsend == (message->len * sizeof(*message->text)));
-                    nsend_total += nsend;
-
-                    fprintf(stdout, "  Retransmitted(%d->%d) %d bytes.\n", fds[i].fd, fds[j].fd, nsend_total);
-                }
                 break;
             default:
                 fprintf(stdout, " Got unhandled message type '%s' from client %d", headerTypeString(header.type), fds[i].fd);

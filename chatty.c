@@ -44,10 +44,11 @@ popup(u32 fg, u32 bg, char* text)
     tb_print(global.width / 2 - len / 2, global.height / 2, fg, bg, text);
 }
 
-// Takes as paramter `struct sockaddr_in*` and uses it to connect to the server.
-// When the server sends a disconnect message this function must be called with the fds struct as
-// paramter.  To indicate that the server is offline the fds[FDS_SERVER] is set to -1.  When online
-// it is set to a non-zero value.
+// Connect to *address_ptr of type `struct sockaddr_in*`.  If it failed wait for TIMEOUT_RECONNECT
+// seconds.
+// This function is meant to be run by a thread.
+// An offline server means fds[FDS_SERVER] is set to -1.  When online
+// it is set to with the appropriate file descriptor.
 // Returns NULL.
 void*
 thread_reconnect(void* address_ptr)
