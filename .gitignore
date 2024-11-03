@@ -1,3 +1,6 @@
 chatty
 send
 server
+_id
+_clients
+*.log
