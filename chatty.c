@@ -17,8 +17,6 @@
 #define INPUT_LIMIT 512
 // Filepath where user ID is stored
 #define ID_FILE "_id"
-// Import id from ID_FILE
-#define IMPORT_ID
 // Filepath where logged
 #define LOGFILE "chatty.log"
 // enable logging
@@ -33,12 +31,12 @@ enum { FDS_UNI = 0, // for one-way communication with the server (eg. TextMessag
 typedef struct {
     u8 author[AUTHOR_LEN];
     ID id;
-} Client;
-#define CLIENT_FMT "[%s](%lu)"
-#define CLIENT_ARG(client) client.author, client.id
+} User;
+#define USER_FMT "[%s](%lu)"
+#define USER_ARG(client) client.author, client.id
 
-// Client used by chatty
-global_variable Client user = {0};
+// User used by chatty
+global_variable User user = {0};
 // Address of chatty server
 global_variable struct sockaddr_in address;
 
@@ -62,12 +60,12 @@ popup(u32 fg, u32 bg, char* text)
 // Returns client in clientsArena matching id
 // Returns user if the id was the user's ID
 // Returns 0 if nothing was found
-Client*
-getClientById(Arena* clientsArena, ID id)
+User*
+getUserByID(Arena* clientsArena, ID id)
 {
     if (id == user.id) return &user;
 
-    Client* clients = clientsArena->addr;
+    User* clients = clientsArena->addr;
     for (u64 i = 0; i < (clientsArena->pos / sizeof(*clients)); i++)
     {
         if (clients[i].id == id)
@@ -78,8 +76,8 @@ getClientById(Arena* clientsArena, ID id)
 
 // Request information of client from fd byd id and add it to clientsArena
 // Returns pointer to added client
-Client*
-addClientInfo(Arena* clientsArena, s32 fd, u64 id)
+User*
+addUserInfo(Arena* clientsArena, s32 fd, u64 id)
 {
     // Request information about ID
     HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
@@ -93,11 +91,11 @@ addClientInfo(Arena* clientsArena, s32 fd, u64 id)
     recvAnyMessageType(fd, &header, &introduction_message, HEADER_TYPE_INTRODUCTION);
 
     // Add the information
-    Client* client = ArenaPush(clientsArena, sizeof(*client));
+    User* client = ArenaPush(clientsArena, sizeof(*client));
     memcpy(client->author, introduction_message.author, AUTHOR_LEN);
     client->id = id;
 
-    loggingf("Got " CLIENT_FMT "\n", CLIENT_ARG((*client)));
+    loggingf("Got " USER_FMT "\n", USER_ARG((*client)));
     return client;
 }
 
@@ -115,7 +113,7 @@ getConnection(struct sockaddr_in* address)
 }
 
 ID
-authenticate(Client* user, s32 fd)
+authenticate(User* user, s32 fd)
 {
     if (user->id)
     {
@@ -149,7 +147,7 @@ authenticate(Client* user, s32 fd)
         assert(nrecv != -1);
         assert(nrecv == sizeof(header));
         assert(header.type == HEADER_TYPE_ID);
-        assert(!header.id);
+        assert(header.id);
         user->id = header.id;
         return header.id;
     }
@@ -384,17 +382,17 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
             HeaderMessage* header = (HeaderMessage*)addr;
             addr += sizeof(*header);
 
-            // Get Client for message
-            Client* client;
+            // Get User for message
+            User* client;
             switch (header->type)
             {
             case HEADER_TYPE_TEXT:
             case HEADER_TYPE_PRESENCE:
-                client = getClientById(clientsArena, header->id);
+                client = getUserByID(clientsArena, header->id);
                 if (!client)
                 {
-                    loggingf("Client not known, requesting from server\n");
-                    client = addClientInfo(clientsArena, fds[FDS_BI].fd, header->id);
+                    loggingf("User not known, requesting from server\n");
+                    client = addUserInfo(clientsArena, fds[FDS_BI].fd, header->id);
                 }
                 assert(client);
                 break;
@@ -595,8 +593,8 @@ main(int argc, char** argv)
             loggingf("errno: %d\n", errno);
             return 1;
         }
-        if (!authenticate(&user, unifd) ||
-            !authenticate(&user, bifd))
+        loggingf("(%d,%d)\n", unifd, bifd);
+        if (!authenticate(&user, unifd))
         {
             loggingf("errno: %d\n", errno);
             return 1;
@@ -735,10 +733,10 @@ main(int argc, char** argv)
                 ninput++;
 
                 // Save header
-                HeaderMessage header = HEADER_INIT(HEADER_TYPE_TEXT);
-                void* addr = ArenaPush(&msgsArena, sizeof(header));
-                memcpy(addr, &header, sizeof(header));
-                header.id = user.id;
+                HeaderMessage* header = ArenaPush(&msgsArena, sizeof(*header));
+                header->version = PROTOCOL_VERSION;
+                header->type = HEADER_TYPE_TEXT;
+                header->id = user.id;
 
                 // Save message
                 TextMessage* sendmsg = ArenaPush(&msgsArena, TEXTMESSAGE_SIZE);
@@ -749,7 +747,7 @@ main(int argc, char** argv)
                 ArenaPush(&msgsArena, text_size);
                 memcpy(&sendmsg->text, input, text_size);
 
-                sendAnyMessage(fds[FDS_UNI].fd, header, sendmsg);
+                sendAnyMessage(fds[FDS_UNI].fd, *header, sendmsg);
 
                 nmessages++;
                 // also clear input
