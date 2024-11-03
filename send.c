@@ -46,18 +46,9 @@ main(int argc, char** argv)
         // Get id
         nrecv = recv(serverfd, &header, sizeof(header), 0);
         assert(nrecv != -1);
-        if (header.type == HEADER_TYPE_ERROR) {
-            ErrorMessage message;
-            nrecv = recv(serverfd, &message, sizeof(message), 0);
-            fprintf(stderr, "Got '%s' error.\n'", errorTypeString(message.type));
-            close(serverfd);
-            return 1;
-        }
         assert(header.type == HEADER_TYPE_ID);
-        IDMessage idmessage;
-        nrecv = recv(serverfd, &idmessage, sizeof(idmessage), 0);
-        assert(nrecv != -1);
-        fprintf(stderr, "Got id: %lu\n", idmessage.id);
+        id = header.id;
+        fprintf(stderr, "Got id: %lu\n", header.id);
     }
 
     // convert text to wide string
@@ -68,13 +59,15 @@ main(int argc, char** argv)
     text_wide[text_len - 1] = 0;
 
     HeaderMessage header = HEADER_INIT(HEADER_TYPE_TEXT);
+    header.id = id;
     TextMessage message;
     bzero(&message, TEXTMESSAGE_SIZE);
-    message = (TextMessage){.id = id, .timestamp = time(NULL), .len = text_len};
+    message = (TextMessage){.timestamp = time(NULL), .len = text_len};
 
     nsend = send(serverfd, &header, sizeof(header), 0);
     assert(nsend != -1);
     fprintf(stderr, "header bytes sent: %d\n", nsend);
+
     nsend = send(serverfd, &message, TEXTMESSAGE_SIZE, 0);
     assert(nsend != -1);
     fprintf(stderr, "message bytes sent: %d\n", nsend);
