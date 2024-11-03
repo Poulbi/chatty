@@ -15,19 +15,28 @@ The idea is the following:
 - [x] wrapping messages
 - [x] bug: when sending message after diconnect (serverfd?)
 - [x] Handle disconnection thiin a thread, the best way would be
-- [ ] ctrl+z to suspend
+- [x] Add limit_y to printf_wrap
+- [x] id2string on clients
+- [x] ctrl+z to suspend
+- [ ] bug(tb_printf_wrap): text after pfx is wrapped one too soon
 
 ## server
+- [x] import clients
 - [ ] check if when sending and the client is offline (due to connection loss) what happens
 - [ ] timeout on recv?
 - [ ] use threads to handle clients/ timeout when receiving because a client could theoretically
   stall the entire server.
 - [ ] do not crash on errors from clients
     - implement error message?
+    - timeout on recv with setsockopt
 
 ## common
 - [x] handle messages that are too large
-- [ ] log messages to file (save history)
+- [x] refactor i&self into conn
+- [x] logging
+- [x] Req|Inf connection per client
+- [ ] bug: blocking after `Added pollfd`, after importing a client and then connecting with the
+  id/or without?  After reconnection fails chatty blocks (remove sleep)
 - [ ] connect/disconnections messages
 - [ ] use IP address / domain
 - [ ] chat history
