@@ -37,12 +37,6 @@ typedef struct {
 #define CLIENT_FMT "[%s](%lu)"
 #define CLIENT_ARG(client) client.author, client.id
 
-typedef struct {
-    s32 err; // Error while connecting
-    s32 unifd;
-    s32 bifd;
-} ConnectionResult;
-
 // Client used by chatty
 global_variable Client user = {0};
 // Address of chatty server
@@ -74,7 +68,8 @@ getClientById(Arena* clientsArena, ID id)
     if (id == user.id) return &user;
 
     Client* clients = clientsArena->addr;
-    for (u64 i = 0; i < (clientsArena->pos / sizeof(*clients)); i++) {
+    for (u64 i = 0; i < (clientsArena->pos / sizeof(*clients)); i++)
+    {
         if (clients[i].id == id)
             return clients + i;
     }
@@ -88,16 +83,17 @@ addClientInfo(Arena* clientsArena, s32 fd, u64 id)
 {
     // Request information about ID
     HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
-    IDMessage id_message = {.id = id};
-    sendAnyMessage(fd, &header, &id_message);
-
-    Client* client = ArenaPush(clientsArena, sizeof(*client));
+    header.id = id;
+    s32 nsend = send(fd, &header, sizeof(header), 0);
+    assert(nsend != -1);
+    assert(nsend == sizeof(header));
 
     // Wait for response
     IntroductionMessage introduction_message;
     recvAnyMessageType(fd, &header, &introduction_message, HEADER_TYPE_INTRODUCTION);
 
     // Add the information
+    Client* client = ArenaPush(clientsArena, sizeof(*client));
     memcpy(client->author, introduction_message.author, AUTHOR_LEN);
     client->id = id;
 
@@ -106,17 +102,57 @@ addClientInfo(Arena* clientsArena, s32 fd, u64 id)
 }
 
 // Tries to connect to address and populates resulting file descriptors in ConnectionResult.
-ConnectionResult
+s32
 getConnection(struct sockaddr_in* address)
 {
-    ConnectionResult result;
-    result.unifd = socket(AF_INET, SOCK_STREAM, 0);
-    result.bifd = socket(AF_INET, SOCK_STREAM, 0);
-    result.err = connect(result.unifd, (struct sockaddr*)address, sizeof(*address));
-    if (result.err) return result; // We do not overwrite the error and return early so we can be
-                                   // certain of what error errno belongs to.
-    result.err = connect(result.bifd, (struct sockaddr*)address, sizeof(*address));
-    return result;
+    s32 fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd == -1) return -1;
+
+    s32 err = connect(fd, (struct sockaddr*)address, sizeof(*address));
+    if (err) return -1;
+
+    return fd;
+}
+
+ID
+authenticate(Client* user, s32 fd)
+{
+    if (user->id)
+    {
+        HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
+        header.id = user->id;
+        s32 nsend = send(fd, &header, sizeof(header), 0);
+        assert(nsend == -1);
+        assert(nsend == sizeof(header));
+
+        s32 nrecv = recv(fd, &header, sizeof(header), 0);
+        if (nrecv == 0)
+            return 0;
+        assert(nrecv != -1);
+        assert(nrecv == sizeof(header));
+        assert(header.type == HEADER_TYPE_ID);
+        if (header.id == user->id)
+            return header.id;
+        else
+            return 0;
+    }
+    else
+    {
+        HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
+        IntroductionMessage message;
+        memcpy(message.author, user->author, AUTHOR_LEN);
+        sendAnyMessage(fd, header, &message);
+
+        s32 nrecv = recv(fd, &header, sizeof(header), 0);
+        if (nrecv == 0)
+            return 0;
+        assert(nrecv != -1);
+        assert(nrecv == sizeof(header));
+        assert(header.type == HEADER_TYPE_ID);
+        assert(!header.id);
+        user->id = header.id;
+        return header.id;
+    }
 }
 
 // Connect to *address_ptr of type `struct sockaddr_in*`.  If it failed wait for TIMEOUT_RECONNECT
@@ -129,49 +165,44 @@ getConnection(struct sockaddr_in* address)
 void*
 threadReconnect(void* fds_ptr)
 {
+    s32 unifd, bifd;
     struct pollfd* fds = fds_ptr;
-    ConnectionResult result;
     struct timespec t = { 0, Miliseconds(300) }; // 300 miliseconds
     loggingf("Trying to reconnect\n");
-    while (1) {
+    while (1)
+    {
+        // timeout
         nanosleep(&t, &t);
-        result = getConnection(&address);
-        if (result.err) {
-            // loggingf("err: %d\n", result.err);
+
+        unifd = getConnection(&address);
+        if (unifd == -1)
+        {
             loggingf("errno: %d\n", errno);
-        } else if (result.unifd != -1 && result.bifd != -1) {
-            loggingf("Reconnect succeeded (%d, %d), authenticating\n", result.unifd, result.bifd);
-            // We assume that we already have an ID
-            // TODO: could there be a problem if a message is received at the same time?
-            //  - not on server restart, but what if we lost connection?
-            HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
-            IDMessage id_message = {.id = user.id};
-            sendAnyMessage(result.bifd, &header, &id_message);
-
-            ErrorMessage error_message;
-            s32 nrecv = recvAnyMessageType(result.bifd, &header, &error_message, HEADER_TYPE_ERROR);
-            if (nrecv == -1 || nrecv == 0) {
-                loggingf("Error on receive, retrying...\n");
-                continue;
-            }
-
-            assert(header.type == HEADER_TYPE_ERROR);
-            if (error_message.type == ERROR_TYPE_SUCCESS) {
-                loggingf("Reconnected\n");
-                break;
-            } else {
-                loggingf("err: %s\n", errorTypeString(error_message.type));
-            }
+            continue;
         }
-        if (result.unifd != -1)
-            close(result.unifd);
-        if (result.bifd != -1)
-            close(result.bifd);
-        loggingf("Failed, retrying..\n");
+        bifd = getConnection(&address);
+        if (bifd == -1)
+        {
+            loggingf("errno: %d\n", errno);
+            close(unifd);
+            continue;
+        }
+
+        loggingf("Reconnect succeeded (%d, %d), authenticating\n", unifd, bifd);
+
+        if (authenticate(&user, unifd) &&
+            authenticate(&user, bifd))
+        {
+            break;
+        }
+
+        close(unifd);
+        close(bifd);
+        loggingf("Failed, retrying...\n");
     }
 
-    fds[FDS_BI].fd = result.bifd;
-    fds[FDS_UNI].fd = result.unifd;
+    fds[FDS_BI].fd = bifd;
+    fds[FDS_UNI].fd = unifd;
 
     // Redraw screen
     raise(SIGWINCH);
@@ -206,16 +237,20 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
     u32 failed = 0;
 
     // NOTE: We can assume that we need to wrap, therefore print a newline after the prefix string
-    if (pfx != 0) {
+    if (pfx != 0)
+    {
         tb_printf(x, ly, fg_pfx, bg_pfx, "%s", pfx);
 
         // If the text fits on one line print the text and return
         // Otherwise print the text on the next line
         s32 pfx_len = strlen((char*)pfx);
-        if (limit_x > pfx_len + text_len) {
+        if (limit_x > pfx_len + text_len)
+        {
             tb_printf(x + pfx_len, y, fg, bg, "%ls", text);
             return 1;
-        } else {
+        }
+        else
+        {
             ly++;
         }
     }
@@ -235,18 +270,22 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
     // 8. step 2. until i >= text_len
     // 9. print remaining part of the string
 
-    while (i < text_len && ly - y < limit_y) {
+    while (i < text_len && ly - y < limit_y)
+    {
         // search backwards for whitespace
         while (i > offset && text[i] != L' ')
             i--;
 
         // retry with bigger limit
-        if (i == offset) {
+        if (i == offset)
+        {
             offset = i;
             failed++;
             i += limit_x + failed * limit_x;
             continue;
-        } else {
+        }
+        else
+        {
             failed = 0;
         }
 
@@ -261,7 +300,8 @@ tb_printf_wrap(u32 x, u32 y, u32 fg, u32 bg, u32* text, s32 text_len, u32 fg_pfx
         offset = i;
         i += limit_x;
     }
-    if ((u32)ly <= limit_y) {
+    if ((u32)ly <= limit_y)
+    {
         tb_printf(x, ly, fg, bg, "%ls", text + offset);
         ly++;
     }
@@ -283,11 +323,14 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
     // the minimum height required is the hight for the box prompt
     // the minimum width required is that one character should fit in the box prompt
     if (global.height < box_height ||
-        global.width < (box_x + box_mar_x * 2 + box_pad_x * 2 + box_bwith * 2 + 1)) {
+        global.width < (box_x + box_mar_x * 2 + box_pad_x * 2 + box_bwith * 2 + 1))
+    {
         // + 1 for cursor
         tb_hide_cursor();
         return;
-    } else {
+    }
+    else
+    {
         // show cursor
         // TODO: show cursor as block character instead of using the real cursor
         bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
@@ -310,11 +353,14 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
 
         u32 offs = (nmessages > free_y) ? nmessages - free_y : 0;
         // skip offs ccount messages
-        for (u32 i = 0; i < offs; i++) {
+        for (u32 i = 0; i < offs; i++)
+        {
             HeaderMessage* header = (HeaderMessage*)addr;
             addr += sizeof(*header);
-            switch (header->type) {
-            case HEADER_TYPE_TEXT: {
+            switch (header->type)
+            {
+            case HEADER_TYPE_TEXT:
+            {
                 TextMessage* message = (TextMessage*)addr;
                 addr += TEXTMESSAGE_SIZE;
                 addr += message->len * sizeof(*message->text);
@@ -333,36 +379,41 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
         }
 
         // In each case statement advance the addr pointer by the size of the message
-        for (u32 i = offs; i < nmessages && msg_y < free_y; i++) {
+        for (u32 i = offs; i < nmessages && msg_y < free_y; i++)
+        {
             HeaderMessage* header = (HeaderMessage*)addr;
             addr += sizeof(*header);
 
             // Get Client for message
-            ID* id;
             Client* client;
-            switch (header->type) {
+            switch (header->type)
+            {
             case HEADER_TYPE_TEXT:
-                id = &((TextMessage*)addr)->id;
             case HEADER_TYPE_PRESENCE:
-                id = &((PresenceMessage*)addr)->id;
-                client = getClientById(clientsArena, *id);
-                if (!client) {
+                client = getClientById(clientsArena, header->id);
+                if (!client)
+                {
                     loggingf("Client not known, requesting from server\n");
-                    client = addClientInfo(clientsArena, fds[FDS_BI].fd, *id);
+                    client = addClientInfo(clientsArena, fds[FDS_BI].fd, header->id);
                 }
                 assert(client);
                 break;
             }
 
-            switch (header->type) {
-            case HEADER_TYPE_TEXT: {
+            switch (header->type)
+            {
+            case HEADER_TYPE_TEXT:
+            {
                 TextMessage* message = (TextMessage*)addr;
 
                 // Color own messages
                 u32 fg = 0;
-                if (user.id == message->id) {
+                if (user.id == header->id)
+                {
                     fg = TB_CYAN;
-                } else {
+                }
+                else
+                {
                     fg = TB_MAGENTA;
                 }
 
@@ -377,13 +428,15 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
                 u32 message_size = TEXTMESSAGE_SIZE + message->len * sizeof(*message->text);
                 addr += message_size;
             } break;
-            case HEADER_TYPE_PRESENCE: {
+            case HEADER_TYPE_PRESENCE:
+            {
                 PresenceMessage* message = (PresenceMessage*)addr;
                 tb_printf(0, msg_y, 0, 0, " [%s] *%s*", client->author, presenceTypeString(message->type));
                 msg_y++;
                 addr += sizeof(*message);
             } break;
-            case HEADER_TYPE_HISTORY: {
+            case HEADER_TYPE_HISTORY:
+            {
                 HistoryMessage* message = (HistoryMessage*)addr;
                 addr += sizeof(*message);
                 // TODO: implement
@@ -445,17 +498,21 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
             if (freesp <= 0)
                 return;
 
-            if (input_len > freesp) {
+            if (input_len > freesp)
+            {
                 u32* text_offs = input + (input_len - freesp);
                 tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", text_offs);
                 global.cursor_x = box_x + box_pad_x + box_mar_x + box_bwith + freesp;
-            } else {
+            }
+            else
+            {
                 global.cursor_x = prompt_x;
                 tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", input);
             }
         }
 
-        if (fds[FDS_UNI].fd == -1 || fds[FDS_BI].fd == -1) {
+        if (fds[FDS_UNI].fd == -1 || fds[FDS_BI].fd == -1)
+        {
             // show error popup
             popup(TB_RED, TB_BLACK, "Server disconnected.");
         }
@@ -465,7 +522,8 @@ screen_home(Arena* msgsArena, u32 nmessages, Arena* clientsArena, struct pollfd*
 int
 main(int argc, char** argv)
 {
-    if (argc < 2) {
+    if (argc < 2)
+    {
         fprintf(stderr, "usage: chatty <username>\n");
         return 1;
     }
@@ -516,67 +574,42 @@ main(int argc, char** argv)
         {0},
     };
 
-    ConnectionResult result = getConnection(&address);
-    if (result.err) {
-        perror("Server");
-        return 1;
-    }
-    assert(result.unifd != -1);
-    assert(result.bifd != -1);
-    assert(!result.err);
-    fds[FDS_BI].fd = result.bifd;
-    fds[FDS_UNI].fd = result.unifd;
-
 #ifdef IMPORT_ID
     // File for storing the user's ID.
     u32 idfile = open(ID_FILE, O_RDWR | O_CREAT, 0600);
     s32 nread = read(idfile, &user.id, sizeof(user.id));
     assert(nread != -1);
-    // see "Authentication" in chatty.h
-    if (nread == sizeof(user.id)) {
-        // Scenario 1: We know our id
-
-        // Send IDMessage and check if it is correct
-        HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
-        IDMessage message = {.id = user.id};
-        sendAnyMessage(fds[FDS_BI].fd, &header, &message);
-
-        ErrorMessage error_message = {0};
-        recvAnyMessageType(fds[FDS_BI].fd, &header, &error_message, HEADER_TYPE_ERROR);
-
-        switch (error_message.type) {
-        case ERROR_TYPE_SUCCESS: break;
-        case ERROR_TYPE_NOTFOUND:
-            printf("Server does not know our ID.  Consider removing '" ID_FILE "'\n");
-            return 1;
-        default:
-            printf("Server: %s\n", errorTypeString(error_message.type));
+#endif
+    /* Authentication */
+    {
+        s32 unifd, bifd;
+        unifd = getConnection(&address);
+        if (unifd == -1)
+        {
+            loggingf("errno: %d\n", errno);
             return 1;
         }
-    } else {
-#else
-    if (1) {
-#endif
-        // Scenario 2: We do not have an ID
-        HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
-        IntroductionMessage message = {0};
-        // copy user data into message
-        memcpy(message.author, user.author, AUTHOR_LEN);
-
-        // Send the introduction message
-        sendAnyMessage(fds[FDS_BI].fd, &header, &message);
-
-        IDMessage id_message = {0};
-        // Receive the response IDMessage
-        recvAnyMessageType(fds[FDS_BI].fd, &header, &id_message, HEADER_TYPE_ID);
-        assert(header.type == HEADER_TYPE_ID);
-        user.id = id_message.id;
-#ifdef IMPORT_ID
-        // Save permanently
-        write(idfile, &user.id, sizeof(user.id));
-        close(idfile);
-#endif
+        bifd = getConnection(&address);
+        if (bifd == -1)
+        {
+            loggingf("errno: %d\n", errno);
+            return 1;
+        }
+        if (!authenticate(&user, unifd) ||
+            !authenticate(&user, bifd))
+        {
+            loggingf("errno: %d\n", errno);
+            return 1;
+        }
+        fds[FDS_UNI].fd = unifd;
+        fds[FDS_BI].fd = bifd;
     }
+
+#ifdef IMPORT_ID
+    // Save id
+    write(idfile, &user.id, sizeof(user.id));
+#endif
+
     loggingf("Got ID: %lu\n", user.id);
 
     // for wide character printing
@@ -590,21 +623,24 @@ main(int argc, char** argv)
     tb_present();
 
     // main loop
-    while (!quit) {
+    while (!quit)
+    {
         err = poll(fds, FDS_MAX, TIMEOUT_POLL);
         // ignore resize events and use them to redraw the screen
         assert(err != -1 || errno == EINTR);
 
         tb_clear();
 
-        if (fds[FDS_UNI].revents & POLLIN) {
+        if (fds[FDS_UNI].revents & POLLIN)
+        {
             // got data from server
             HeaderMessage header;
             nrecv = recv(fds[FDS_UNI].fd, &header, sizeof(header), 0);
             assert(nrecv != -1);
 
             // Server disconnects
-            if (nrecv == 0) {
+            if (nrecv == 0)
+            {
                 // close diconnected server's socket
                 err = close(fds[FDS_UNI].fd);
                 assert(err == 0);
@@ -612,8 +648,11 @@ main(int argc, char** argv)
                 // start trying to reconnect in a thread
                 err = pthread_create(&thr_rec, 0, &threadReconnect, (void*)fds);
                 assert(err == 0);
-            } else {
-                if (header.version != PROTOCOL_VERSION) {
+            }
+            else
+            {
+                if (header.version != PROTOCOL_VERSION)
+                {
                     loggingf("Header received does not match version\n");
                     continue;
                 }
@@ -622,7 +661,8 @@ main(int argc, char** argv)
                 memcpy(addr, &header, sizeof(header));
 
                 // Messages handled from server
-                switch (header.type) {
+                switch (header.type)
+                {
                 case HEADER_TYPE_TEXT:
                     recvTextMessage(&msgsArena, fds[FDS_UNI].fd);
                     nmessages++;
@@ -641,15 +681,19 @@ main(int argc, char** argv)
             }
         }
 
-        if (fds[FDS_TTY].revents & POLLIN) {
+        if (fds[FDS_TTY].revents & POLLIN)
+        {
             // got a key event
             tb_poll_event(&ev);
 
-            switch (ev.key) {
+            switch (ev.key)
+            {
             case TB_KEY_CTRL_W:
                 // delete consecutive whitespace
-                while (ninput) {
-                    if (input[ninput - 1] == L' ') {
+                while (ninput)
+                {
+                    if (input[ninput - 1] == L' ')
+                    {
                         input[ninput - 1] = 0;
                         ninput--;
                         continue;
@@ -657,7 +701,8 @@ main(int argc, char** argv)
                     break;
                 }
                 // delete until whitespace
-                while (ninput) {
+                while (ninput)
+                {
                     if (input[ninput - 1] == L' ')
                         break;
                     // erase
@@ -665,7 +710,8 @@ main(int argc, char** argv)
                     ninput--;
                 }
                 break;
-            case TB_KEY_CTRL_Z: {
+            case TB_KEY_CTRL_Z:
+            {
                 pid_t pid = getpid();
                 tb_shutdown();
                 kill(pid, SIGSTOP);
@@ -692,10 +738,10 @@ main(int argc, char** argv)
                 HeaderMessage header = HEADER_INIT(HEADER_TYPE_TEXT);
                 void* addr = ArenaPush(&msgsArena, sizeof(header));
                 memcpy(addr, &header, sizeof(header));
+                header.id = user.id;
 
                 // Save message
                 TextMessage* sendmsg = ArenaPush(&msgsArena, TEXTMESSAGE_SIZE);
-                sendmsg->id = user.id;
                 sendmsg->timestamp = time(0);
                 sendmsg->len = ninput;
 
@@ -703,7 +749,7 @@ main(int argc, char** argv)
                 ArenaPush(&msgsArena, text_size);
                 memcpy(&sendmsg->text, input, text_size);
 
-                sendAnyMessage(fds[FDS_UNI].fd, &header, sendmsg);
+                sendAnyMessage(fds[FDS_UNI].fd, header, sendmsg);
 
                 nmessages++;
                 // also clear input
@@ -728,7 +774,8 @@ main(int argc, char** argv)
         }
 
         // These are used to redraw the screen from threads
-        if (fds[FDS_RESIZE].revents & POLLIN) {
+        if (fds[FDS_RESIZE].revents & POLLIN)
+        {
             // ignore
             tb_poll_event(&ev);
         }

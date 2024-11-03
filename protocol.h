@@ -49,6 +49,7 @@ typedef u64 ID;
 typedef struct {
     u16 version;
     u8 type;
+    ID id;
 } HeaderMessage;
 
 typedef enum {
@@ -60,7 +61,7 @@ typedef enum {
     HEADER_TYPE_ERROR
 } HeaderType;
 // shorthand for creating a header with a value from the enum
-#define HEADER_INIT(t) {.version = PROTOCOL_VERSION, .type = t}
+#define HEADER_INIT(t) {.version = PROTOCOL_VERSION, .type = t, .id = 0}
 // from Tsoding video on minicel (https://youtu.be/HCAgvKQDJng?t=4546)
 // sv(https://github.com/tsoding/sv)
 #define HEADER_FMT "header: v%d %s(%d)"
@@ -69,11 +70,9 @@ typedef enum {
 // For sending texts to other clients
 // - 13 bytes for the author
 // - 8 bytes for the timestamp
-// - 8 bytes for id
 // - 2 bytes for the text length
 // - x*4 bytes for the text
 typedef struct {
-    ID id;
     u64 timestamp; // timestamp of when the message was sent
     u16 len;
     wchar_t* text; // placeholder for indexing
@@ -97,19 +96,9 @@ typedef struct {
 #define INTRODUCTION_FMT "introduction: %s"
 #define INTRODUCTION_ARG(message) message.author
 
-// Request IntroductionMessage for client with that id.
-// See "First connection" if this message is used when the client connects for the first time.
-// be used to retrieve information about a client with an unknown ID.
-// - 8 bytes for id
-typedef struct {
-    ID id;
-} IDMessage;
-
 // Notifying the sender's state, such as "connected", "disconnected", "AFK", ...
-// - 8 bytes for id
 // - 1 byte for type
 typedef struct {
-    ID id;
     u8 type;
 } PresenceMessage;
 typedef enum {
@@ -141,11 +130,11 @@ typedef struct {
 u8*
 headerTypeString(HeaderType type)
 {
-    switch (type) {
+    switch (type)
+    {
     case HEADER_TYPE_TEXT: return (u8*)"TextMessage";
     case HEADER_TYPE_HISTORY: return (u8*)"HistoryMessage";
     case HEADER_TYPE_PRESENCE: return (u8*)"PresenceMessage";
-    case HEADER_TYPE_ID: return (u8*)"IDMessage";
     case HEADER_TYPE_INTRODUCTION: return (u8*)"IntroductionMessage";
     case HEADER_TYPE_ERROR: return (u8*)"ErrorMessage";
     default: return (u8*)"Unknown";
@@ -155,7 +144,8 @@ headerTypeString(HeaderType type)
 u8*
 presenceTypeString(PresenceType type)
 {
-    switch (type) {
+    switch (type)
+    {
     case PRESENCE_TYPE_CONNECTED: return (u8*)"connected";
     case PRESENCE_TYPE_DISCONNECTED: return (u8*)"disconnected";
     case PRESENCE_TYPE_AFK: return (u8*)"afk";
@@ -166,7 +156,8 @@ presenceTypeString(PresenceType type)
 u8*
 errorTypeString(ErrorType type)
 {
-    switch (type) {
+    switch (type)
+    {
     case ERROR_TYPE_BADMESSAGE: return (u8*)"bad message";
     case ERROR_TYPE_NOTFOUND: return (u8*)"not found";
     case ERROR_TYPE_SUCCESS: return (u8*)"success";
@@ -217,10 +208,11 @@ u32
 getMessageSize(HeaderType type)
 {
     u32 size = 0;
-    switch (type) {
+    switch (type)
+    {
     case HEADER_TYPE_ERROR: size = sizeof(ErrorMessage); break;
     case HEADER_TYPE_HISTORY: size = sizeof(HistoryMessage); break;
-    case HEADER_TYPE_ID: size = sizeof(IDMessage); break;
+    case HEADER_TYPE_ID: size = sizeof(HeaderMessage); break;
     case HEADER_TYPE_INTRODUCTION: size = sizeof(IntroductionMessage); break;
     case HEADER_TYPE_PRESENCE: size = sizeof(PresenceMessage); break;
     default: assert(0);
@@ -237,7 +229,8 @@ recvAnyMessageType(s32 fd, HeaderMessage* header, void *anyMessage, HeaderType t
     assert(nrecv == sizeof(*header));
 
     s32 size = 0;
-    switch (type) {
+    switch (type)
+    {
     case HEADER_TYPE_ERROR:
     case HEADER_TYPE_HISTORY:
     case HEADER_TYPE_ID:
@@ -245,7 +238,8 @@ recvAnyMessageType(s32 fd, HeaderMessage* header, void *anyMessage, HeaderType t
     case HEADER_TYPE_PRESENCE:
         size = getMessageSize(header->type);
         break;
-    case HEADER_TYPE_TEXT: {
+    case HEADER_TYPE_TEXT:
+    {
         TextMessage* message = anyMessage;
         size = TEXTMESSAGE_SIZE + message->len * sizeof(*message->text);
     } break;
@@ -270,7 +264,8 @@ recvAnyMessage(Arena* arena, s32 fd)
     assert(nrecv == sizeof(*header));
 
     s32 size = 0;
-    switch (header->type) {
+    switch (header->type)
+    {
     case HEADER_TYPE_ERROR:
     case HEADER_TYPE_HISTORY:
     case HEADER_TYPE_ID:
@@ -278,7 +273,8 @@ recvAnyMessage(Arena* arena, s32 fd)
     case HEADER_TYPE_PRESENCE:
         size = getMessageSize(header->type);
         break;
-    case HEADER_TYPE_TEXT: {
+    case HEADER_TYPE_TEXT:
+    {
         Message result;
         result.header = header;
         result.message = recvTextMessage(arena, fd);
@@ -303,7 +299,8 @@ Message
 waitForMessageType(Arena* arena, Arena* queueArena, u32 fd, HeaderType type)
 {
     Message message;
-    while (1) {
+    while (1)
+    {
         message = recvAnyMessage(arena, fd);
         if (message.header->type == type)
             break;
@@ -315,24 +312,26 @@ waitForMessageType(Arena* arena, Arena* queueArena, u32 fd, HeaderType type)
 // Generic sending function for sending any type of message to fd
 // Returns number of bytes sent in message or -1 if there was an error.
 s32
-sendAnyMessage(u32 fd, HeaderMessage* header, void* anyMessage)
+sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
 {
     s32 nsend_total;
-    s32 nsend = send(fd, header, sizeof(*header), 0);
+    s32 nsend = send(fd, &header, sizeof(header), 0);
     if (nsend == -1) return nsend;
-    assert(nsend == sizeof(*header));
+    assert(nsend == sizeof(header));
     nsend_total = nsend;
 
     s32 size = 0;
-    switch (header->type) {
+    switch (header.type)
+    {
     case HEADER_TYPE_ERROR:
     case HEADER_TYPE_HISTORY:
     case HEADER_TYPE_ID:
     case HEADER_TYPE_INTRODUCTION:
     case HEADER_TYPE_PRESENCE:
-        size = getMessageSize(header->type);
+        size = getMessageSize(header.type);
         break;
-    case HEADER_TYPE_TEXT: {
+    case HEADER_TYPE_TEXT:
+    {
         nsend = send(fd, anyMessage, TEXTMESSAGE_SIZE, 0);
         assert(nsend != -1);
         assert(nsend == TEXTMESSAGE_SIZE);
@@ -345,7 +344,7 @@ sendAnyMessage(u32 fd, HeaderMessage* header, void* anyMessage)
         anyMessage = &message->text;
     } break;
     default:
-        fprintf(stdout, "sendAnyMessage(%d)|Cannot send %s\n", fd, headerTypeString(header->type));
+        fprintf(stdout, "sendAnyMessage(%d)|Cannot send %s\n", fd, headerTypeString(header.type));
         return 0;
     }
 

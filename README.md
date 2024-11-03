@@ -22,6 +22,7 @@ The idea is the following:
 
 ## server
 - [x] import clients
+- [ ] check that fds arena does not overflow
 - [ ] check if when sending and the client is offline (due to connection loss) what happens
 - [ ] timeout on recv?
 - [ ] use threads to handle clients/ timeout when receiving because a client could theoretically
@@ -29,30 +30,31 @@ The idea is the following:
 - [ ] do not crash on errors from clients
     - implement error message?
     - timeout on recv with setsockopt
+- [ ] theoretically two clients can connect at the same time.  The uni/bi connections should be
+      negotiated.
 
 ## common
 - [x] handle messages that are too large
 - [x] refactor i&self into conn
 - [x] logging
 - [x] Req|Inf connection per client
+- [x] connect/disconnect messages
 - [ ] bug: blocking after `Added pollfd`, after importing a client and then connecting with the
   id/or without?  After reconnection fails chatty blocks (remove sleep)
 - [ ] connect/disconnections messages
 - [ ] use IP address / domain
 - [ ] chat history
 - [ ] asserting, logging if fail / halt execution
+- [ ] compression
 
 ## Protocol
 - see `protocol.h` for more info
 - [ ] make sections per message
 - request chat logs from a certain point up to now (history)
 - connect to a specific room
-- connect/disconnect messages
 
 - The null terminator must be sent with the string.
 - The text can be arbitrary length
-
-- [ ] compression
 
 ## Arena's
 1. There is an arena for the messages' texts (`msgTextArena`) and an arena for the messages
@@ -82,4 +84,4 @@ Notice, that this depends on knowing the text's length before allocating the mem
 - *pthreads*: [C for dummies](https://c-for-dummies.com/blog/?p=5365)
 - *unicode and wide characters*: [C for dummies](https://c-for-dummies.com/blog/?p=2578)
 - *sockets*: [Nir Lichtman - Making Minimalist Chat Server in C on Linux](https://www.youtube.com/watch?v=gGfTjKwLQxY)
-- syscall manpages
+- syscall manpages `man`
