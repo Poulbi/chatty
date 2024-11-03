@@ -44,6 +44,9 @@ typedef enum {
 #define global_variable
 #define internal static
 
+// Enable/Disable saving clients permanently to file
+// #define IMPORT_ID
+
 global_variable s32 logfd;
 
 u32

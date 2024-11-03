@@ -135,6 +135,7 @@ headerTypeString(HeaderType type)
     case HEADER_TYPE_TEXT: return (u8*)"TextMessage";
     case HEADER_TYPE_HISTORY: return (u8*)"HistoryMessage";
     case HEADER_TYPE_PRESENCE: return (u8*)"PresenceMessage";
+    case HEADER_TYPE_ID: return (u8*)"IDMessage";
     case HEADER_TYPE_INTRODUCTION: return (u8*)"IntroductionMessage";
     case HEADER_TYPE_ERROR: return (u8*)"ErrorMessage";
     default: return (u8*)"Unknown";
@@ -212,7 +213,6 @@ getMessageSize(HeaderType type)
     {
     case HEADER_TYPE_ERROR: size = sizeof(ErrorMessage); break;
     case HEADER_TYPE_HISTORY: size = sizeof(HistoryMessage); break;
-    case HEADER_TYPE_ID: size = sizeof(HeaderMessage); break;
     case HEADER_TYPE_INTRODUCTION: size = sizeof(IntroductionMessage); break;
     case HEADER_TYPE_PRESENCE: size = sizeof(PresenceMessage); break;
     default: assert(0);
@@ -233,7 +233,6 @@ recvAnyMessageType(s32 fd, HeaderMessage* header, void *anyMessage, HeaderType t
     {
     case HEADER_TYPE_ERROR:
     case HEADER_TYPE_HISTORY:
-    case HEADER_TYPE_ID:
     case HEADER_TYPE_INTRODUCTION:
     case HEADER_TYPE_PRESENCE:
         size = getMessageSize(header->type);
@@ -268,7 +267,6 @@ recvAnyMessage(Arena* arena, s32 fd)
     {
     case HEADER_TYPE_ERROR:
     case HEADER_TYPE_HISTORY:
-    case HEADER_TYPE_ID:
     case HEADER_TYPE_INTRODUCTION:
     case HEADER_TYPE_PRESENCE:
         size = getMessageSize(header->type);
@@ -325,7 +323,6 @@ sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
     {
     case HEADER_TYPE_ERROR:
     case HEADER_TYPE_HISTORY:
-    case HEADER_TYPE_ID:
     case HEADER_TYPE_INTRODUCTION:
     case HEADER_TYPE_PRESENCE:
         size = getMessageSize(header.type);
