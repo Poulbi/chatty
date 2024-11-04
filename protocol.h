@@ -16,19 +16,32 @@
 // - strings are sent with their null terminator
 //
 /// Authentication
-//    This is what happens when the first time a client connects.
-//      Scenario 1. We alreayd have an ID
+//      Each header contains the id of the sender, because ids start at 1
+//      message with id 0 is considered unauthenticated.
+//
+//      When the server receives a header with id 0, this can happen
+//      Scenario 1: IDMessage, client already has an ID
 //      1. client-> Send own ID
 //      2. server-> knows ID?
 //           y. server-> Success
 //           n. 1. server-> Error 'notfound'
 //              2. client-> exit
-//      Scenario 2. We do not have an ID
+//      Scenario 2: IntroductionMessage, client requests a new ID
 //      1. client-> Introduces
 //      2. server-> Sends & Saves ID
-//      3. client-> Saves ID
+//      3. Save ID
 //
-/// Naming convention
+//      BIFD & UNIFD
+//      Each client has 2 connections that must be authenticated one for 2-way
+//      communication and one for 1-way communication.  Respectively BIFD and
+//      UNIFD.  BIFD must be authenticated first and is meant for requests such
+//      as getting an IntroductionMessage for a sent IDMessage.
+//      UNIFD is for messages that are like notifications.  For example
+//      PresenceMessage that tells us when another user connected.
+//      These two connections separate these message types so we do not have to
+//      worry about receiving a PresenceMessage when waiting for an a response.
+//
+/// Naming conventions
 // Messages end with the Message suffix (eg. TextMessag, HistoryMessage)
 //
 // A function that is coupled to a type works like
@@ -64,8 +77,8 @@ typedef enum {
 #define HEADER_INIT(t) {.version = PROTOCOL_VERSION, .type = t, .id = 0}
 // from Tsoding video on minicel (https://youtu.be/HCAgvKQDJng?t=4546)
 // sv(https://github.com/tsoding/sv)
-#define HEADER_FMT "header: v%d %s(%d)"
-#define HEADER_ARG(header) header.version, headerTypeString(header.type), header.type
+#define HEADER_FMT "header: v%d %s(%d) [%d]"
+#define HEADER_ARG(header) header.version, headerTypeString(header.type), header.type, header.id
 
 // For sending texts to other clients
 // - 13 bytes for the author
@@ -120,6 +133,10 @@ typedef enum {
     ERROR_TYPE_TOOMANYCONNECTIONS
 } ErrorType;
 #define ERROR_INIT(t) {.type = t}
+
+typedef struct {
+    ID id;
+} IDMessage;
 
 typedef struct {
     s32 nrecv;
@@ -215,6 +232,7 @@ getMessageSize(HeaderType type)
     case HEADER_TYPE_HISTORY: size = sizeof(HistoryMessage); break;
     case HEADER_TYPE_INTRODUCTION: size = sizeof(IntroductionMessage); break;
     case HEADER_TYPE_PRESENCE: size = sizeof(PresenceMessage); break;
+    case HEADER_TYPE_ID: size = sizeof(IDMessage); break;
     default: assert(0);
     }
     return size;
@@ -235,6 +253,7 @@ recvAnyMessageType(s32 fd, HeaderMessage* header, void *anyMessage, HeaderType t
     case HEADER_TYPE_HISTORY:
     case HEADER_TYPE_INTRODUCTION:
     case HEADER_TYPE_PRESENCE:
+    case HEADER_TYPE_ID:
         size = getMessageSize(header->type);
         break;
     case HEADER_TYPE_TEXT:
@@ -265,12 +284,6 @@ recvAnyMessage(Arena* arena, s32 fd)
     s32 size = 0;
     switch (header->type)
     {
-    case HEADER_TYPE_ERROR:
-    case HEADER_TYPE_HISTORY:
-    case HEADER_TYPE_INTRODUCTION:
-    case HEADER_TYPE_PRESENCE:
-        size = getMessageSize(header->type);
-        break;
     case HEADER_TYPE_TEXT:
     {
         Message result;
@@ -278,7 +291,10 @@ recvAnyMessage(Arena* arena, s32 fd)
         result.message = recvTextMessage(arena, fd);
         return result;
     } break;
-    default: assert(0); break;
+    default:
+    {
+        size = getMessageSize(header->type);
+    } break;
     }
 
     void* message = ArenaPush(arena, size);
@@ -315,6 +331,7 @@ sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
     s32 nsend_total;
     s32 nsend = send(fd, &header, sizeof(header), 0);
     if (nsend == -1) return nsend;
+    loggingf("sendAnyMessage (%d)|sending "HEADER_FMT"\n", fd, HEADER_ARG(header));
     assert(nsend == sizeof(header));
     nsend_total = nsend;
 
@@ -325,6 +342,7 @@ sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
     case HEADER_TYPE_HISTORY:
     case HEADER_TYPE_INTRODUCTION:
     case HEADER_TYPE_PRESENCE:
+    case HEADER_TYPE_ID:
         size = getMessageSize(header.type);
         break;
     case HEADER_TYPE_TEXT:
@@ -341,8 +359,8 @@ sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
         anyMessage = &message->text;
     } break;
     default:
-        fprintf(stdout, "sendAnyMessage(%d)|Cannot send %s\n", fd, headerTypeString(header.type));
-        return 0;
+        loggingf("sendAnyMessage (%d)|Cannot send %s\n", fd, headerTypeString(header.type));
+        return -1;
     }
 
     nsend = send(fd, anyMessage, size, 0);

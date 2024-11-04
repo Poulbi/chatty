@@ -22,8 +22,8 @@
 // enable logging
 #define LOGGING
 
-enum { FDS_UNI = 0, // for one-way communication with the server (eg. TextMessage)
-       FDS_BI,      // For two-way communication with the server (eg. IDMessage)
+enum { FDS_BI = 0, // for one-way communication with the server (eg. TextMessage)
+       FDS_UNI,      // For two-way communication with the server (eg. IDMessage)
        FDS_TTY,
        FDS_RESIZE,
        FDS_MAX };
@@ -63,6 +63,7 @@ popup(u32 fg, u32 bg, char* text)
 User*
 getUserByID(Arena* clientsArena, ID id)
 {
+    // User is not in the clientsArena
     if (id == user.id) return &user;
 
     User* clients = clientsArena->addr;
@@ -81,10 +82,10 @@ addUserInfo(Arena* clientsArena, s32 fd, u64 id)
 {
     // Request information about ID
     HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
-    header.id = id;
-    s32 nsend = send(fd, &header, sizeof(header), 0);
+    header.id = user.id;
+    IDMessage message = {id};
+    s32 nsend = sendAnyMessage(fd, header, &message);
     assert(nsend != -1);
-    assert(nsend == sizeof(header));
 
     // Wait for response
     IntroductionMessage introduction_message;
@@ -112,44 +113,46 @@ getConnection(struct sockaddr_in* address)
     return fd;
 }
 
-ID
+// Authenticates a file descriptor with either the user's id if non-zero or 
+// it's information if id is zero.
+// Returns 0 if an error occurred.  Non-zero on success.
+u32
 authenticate(User* user, s32 fd)
 {
+    /* Scenario 1: Already have an ID */
     if (user->id)
     {
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
-        header.id = user->id;
-        s32 nsend = send(fd, &header, sizeof(header), 0);
-        assert(nsend == -1);
-        assert(nsend == sizeof(header));
+        IDMessage message = {user->id};
+        s32 nsend = sendAnyMessage(fd, header, &message);
+        assert(nsend != -1);
 
-        s32 nrecv = recv(fd, &header, sizeof(header), 0);
+        ErrorMessage error_message;
+        s32 nrecv = recvAnyMessageType(fd, &header, &error_message, HEADER_TYPE_ERROR);
+        assert(nrecv != -1);
+        // TODO: handle not found
         if (nrecv == 0)
             return 0;
-        assert(nrecv != -1);
-        assert(nrecv == sizeof(header));
-        assert(header.type == HEADER_TYPE_ID);
-        if (header.id == user->id)
-            return header.id;
+
+        if (error_message.type == ERROR_TYPE_SUCCESS)
+            return 1;
         else
             return 0;
     }
+    /* Scenario 2: No ID, request one from server */
     else
     {
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
         IntroductionMessage message;
         memcpy(message.author, user->author, AUTHOR_LEN);
-        sendAnyMessage(fd, header, &message);
+        s32 nsend = sendAnyMessage(fd, header, &message);
+        assert(nsend != -1);
 
-        s32 nrecv = recv(fd, &header, sizeof(header), 0);
-        if (nrecv == 0)
-            return 0;
+        IDMessage id_message;
+        s32 nrecv = recvAnyMessageType(fd, &header, &id_message, HEADER_TYPE_ID);
         assert(nrecv != -1);
-        assert(nrecv == sizeof(header));
-        assert(header.type == HEADER_TYPE_ID);
-        assert(header.id);
-        user->id = header.id;
-        return header.id;
+        user->id = id_message.id;
+        return 1;
     }
 }
 
@@ -172,30 +175,31 @@ threadReconnect(void* fds_ptr)
         // timeout
         nanosleep(&t, &t);
 
-        unifd = getConnection(&address);
-        if (unifd == -1)
-        {
-            loggingf("errno: %d\n", errno);
-            continue;
-        }
         bifd = getConnection(&address);
         if (bifd == -1)
         {
             loggingf("errno: %d\n", errno);
-            close(unifd);
+            continue;
+        }
+        unifd = getConnection(&address);
+        if (unifd == -1)
+        {
+            loggingf("errno: %d\n", errno);
+            close(bifd);
             continue;
         }
 
         loggingf("Reconnect succeeded (%d, %d), authenticating\n", unifd, bifd);
 
-        if (authenticate(&user, unifd) &&
-            authenticate(&user, bifd))
+        if (authenticate(&user, bifd) &&
+            authenticate(&user, unifd))
         {
             break;
         }
 
-        close(unifd);
         close(bifd);
+        close(unifd);
+
         loggingf("Failed, retrying...\n");
     }
 
@@ -559,8 +563,8 @@ main(int argc, char** argv)
 
     // poopoo C cannot infer type
     struct pollfd fds[FDS_MAX] = {
-        {-1, POLLIN, 0}, // FDS_UNI
         {-1, POLLIN, 0}, // FDS_BI
+        {-1, POLLIN, 0}, // FDS_UNI
         {-1, POLLIN, 0}, // FDS_TTY
         {-1, POLLIN, 0}, // FDS_RESIZE
     };
@@ -581,26 +585,31 @@ main(int argc, char** argv)
     /* Authentication */
     {
         s32 unifd, bifd;
-        unifd = getConnection(&address);
-        if (unifd == -1)
-        {
-            loggingf("errno: %d\n", errno);
-            return 1;
-        }
         bifd = getConnection(&address);
         if (bifd == -1)
         {
             loggingf("errno: %d\n", errno);
             return 1;
         }
-        loggingf("(%d,%d)\n", unifd, bifd);
-        if (!authenticate(&user, unifd))
+        unifd = getConnection(&address);
+        if (unifd == -1)
         {
             loggingf("errno: %d\n", errno);
             return 1;
         }
-        fds[FDS_UNI].fd = unifd;
+        loggingf("(%d,%d)\n", bifd, unifd);
+        if (!authenticate(&user, bifd) ||
+            !authenticate(&user, unifd))
+        {
+            loggingf("errno: %d\n", errno);
+            return 1;
+        }
+        else
+        {
+            loggingf("Authenticated (%d,%d)\n", bifd, unifd);
+        }
         fds[FDS_BI].fd = bifd;
+        fds[FDS_UNI].fd = unifd;
     }
 
 #ifdef IMPORT_ID
