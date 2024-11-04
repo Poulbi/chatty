@@ -37,15 +37,15 @@ enum { FDS_STDIN = 0,
 typedef struct {
     u8 author[AUTHOR_LEN]; // matches author property on other message types
     ID id;
-    struct pollfd* unifd; // Index in fds array
     struct pollfd* bifd;  // Index in fds array
+    struct pollfd* unifd; // Index in fds array
 } Client;
 #define CLIENT_FMT "[%s](%lu)"
 #define CLIENT_ARG(client) client.author, client.id
 
 typedef enum {
-    UNIFD = 0,
-    BIFD
+    BIFD = 0,
+    UNIFD,
 } ClientFD;
 
 // TODO: remove global variable
@@ -104,46 +104,62 @@ printTextMessage(TextMessage* message, Client* client, u8 wide)
 
 // Send header and anyMessage to each connection in fds that is nfds number of connections except
 // for connfd.
+// Does not send if pollfd is not set or pollfd->fd is -1.
 // Type will filter out only connections matching the type.
 void
 sendToOthers(Client* clients, u32 nclients, Client* client, ClientFD type, HeaderMessage* header, void* anyMessage)
 {
-    s32 nsend;
-    for (u32 i = 0; i < nclients; i ++)
+    s32 nsend, fd;
+    for (u32 i = 0; i < nclients - 1; i ++)
 	{
         if (clients + i == client) continue;
 
         if (type == UNIFD)
         {
-            nsend = sendAnyMessage(client->unifd->fd, *header, anyMessage);
+            if (clients[i].unifd && clients[i].unifd->fd != -1)
+                fd = clients[i].unifd->fd;
+            else
+                continue;
         }
         else if (type == BIFD)
         {
-            nsend = sendAnyMessage(client->bifd->fd, *header, anyMessage);
+            if (clients[i].bifd && clients[i].bifd->fd != -1)
+                fd = clients[i].bifd->fd;
+            else
+                continue;
         }
+        nsend = sendAnyMessage(fd, *header, anyMessage);
+
         assert(nsend != -1);
-        loggingf("sendToOthers "CLIENT_FMT"|%s %d bytes\n", CLIENT_ARG((*client)), headerTypeString(header->type), nsend);
+        loggingf("sendToOthers "CLIENT_FMT"|%d<-%s %d bytes\n", CLIENT_ARG((clients[i])), fd, headerTypeString(header->type), nsend);
     }
 }
 
 // Send header and anyMessage to each connection in fds that is nfds number of connections.
+// Does not send if pollfd is not set or pollfd->fd is -1.
 // Type will filter out only connections matching the type.
 void
 sendToAll(Client* clients, u32 nclients, ClientFD type, HeaderMessage* header, void* anyMessage)
 {
     s32 nsend;
-    for (u32 i = 0; i < nclients; i++)
+    for (u32 i = 0; i < nclients - 1; i++)
 	{
         if (type == UNIFD)
         {
             if (clients[i].unifd && clients[i].unifd->fd != -1)
                 nsend = sendAnyMessage(clients[i].unifd->fd, *header, anyMessage);
+            else
+                continue;
         }
         else if (type == BIFD)
         {
             if (clients[i].bifd && clients[i].bifd->fd != -1)
                 nsend = sendAnyMessage(clients[i].bifd->fd, *header, anyMessage);
+            else
+                continue;
         }
+        else
+            assert(0);
         assert(nsend != -1);
         loggingf("sendToAll|[%s]->"CLIENT_FMT" %d bytes\n", headerTypeString(header->type),
                                                             CLIENT_ARG(clients[i]),
@@ -187,6 +203,8 @@ disconnectAndNotify(Client* clients, u32 nclients, Client* client)
 // clientsArena if it already exists.  Otherwise push a new onto the arena and write its information
 // to clients_file.
 // See "Authentication" in chatty.h
+// Assumes that the client will send a IDMessage or IntroductionMessage
+// Returns authenticated client
 Client*
 authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, HeaderMessage header)
 {
@@ -198,7 +216,11 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
     /* Scenario 1: Search for existing client */
     if (header.type == HEADER_TYPE_ID)
     {
-        client = getClientByID((Client*)clientsArena->addr, nclients, header.id);
+        IDMessage message;
+        s32 nrecv = recv(pollfd->fd, &message, sizeof(message), 0);
+        assert(nrecv == sizeof(message));
+
+        client = getClientByID((Client*)clientsArena->addr, nclients, message.id);
         if (!client)
         {
             loggingf("authenticate (%d)|notfound\n", pollfd->fd);
@@ -207,24 +229,26 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
             sendAnyMessage(pollfd->fd, header, &error_message);
             return 0;
         }
+        else
+        {
+            loggingf("authenticate (%d)|found [%s](%lu)\n", pollfd->fd, client->author, client->id);
+            header.type = HEADER_TYPE_ERROR;
+            ErrorMessage error_message = ERROR_INIT(ERROR_TYPE_SUCCESS);
+            sendAnyMessage(pollfd->fd, header, &error_message);
+        }
 
-        loggingf("authenticate (%d)|found [%s](%lu)\n", pollfd->fd, client->author, client->id);
-        if (!client->unifd)
-            client->unifd = pollfd; 
-        else if(!client->bifd)
+        if (!client->bifd)
             client->bifd = pollfd;
+        else if (!client->unifd)
+            client->unifd = pollfd;
         else
             assert(0);
 
-        header.type = HEADER_TYPE_ERROR;
-        ErrorMessage error_message = ERROR_INIT(ERROR_TYPE_SUCCESS);
-        sendAnyMessage(pollfd->fd, header, &error_message);
 
         return client;
     }
-
     /* Scenario 2: Create a new client */
-    if (header.type == HEADER_TYPE_INTRODUCTION)
+    else if (header.type == HEADER_TYPE_INTRODUCTION)
     {
         IntroductionMessage message;
         nrecv = recv(pollfd->fd, &message, sizeof(message), 0);
@@ -239,10 +263,10 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
         memcpy(client->author, message.author, AUTHOR_LEN);
         client->id = nclients;
 
-        if (!client->unifd)
-            client->unifd = pollfd; 
-        else if(!client->bifd)
-            client->bifd = pollfd;
+        if (!client->bifd)
+            client->bifd = pollfd; 
+        else if (!client->unifd)
+            client->unifd = pollfd;
         else
             assert(0);
 
@@ -255,10 +279,11 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
 
         // Send ID to new client
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
-        header.id = client->id;
-        s32 nsend = send(pollfd->fd, &header, sizeof(header), 0);
+        IDMessage id_message;
+        id_message.id = client->id;
+
+        s32 nsend = sendAnyMessage(pollfd->fd, header, &id_message);
         assert(nsend != -1);
-        assert(nsend == sizeof(header));
 
         return client;
     }
@@ -349,13 +374,13 @@ main(int argc, char** argv)
         nclients += statbuf.st_size / sizeof(*clients);
 
         // Reset pointers on imported clients
-        for (u32 i = 0; i < nclients; i++)
+        for (u32 i = 0; i < nclients - 1; i++)
         {
             clients[i].unifd = 0;
             clients[i].bifd = 0;
         }
     }
-    for (u32 i = 0; i < nclients; i++)
+    for (u32 i = 0; i < nclients - 1; i++)
         loggingf("Imported: " CLIENT_FMT "\n", CLIENT_ARG(clients[i]));
 #else
     clients_file = 0;
@@ -425,9 +450,8 @@ main(int argc, char** argv)
                 client = getClientByFD(clients, nclients, fds[conn].fd);
                 if (client)
                 {
-                    loggingf(CLIENT_FMT" %d/%lu bytes\n", CLIENT_ARG((*client)), nrecv, sizeof(header));
+                    loggingf("Received %d/%lu bytes "CLIENT_FMT"\n", nrecv, sizeof(header), CLIENT_ARG((*client)));
                     disconnectAndNotify(clients, nclients, client);
-                    loggingf("Disconnected(%lu) [%s]\n", client->id, client->author);
                 }
                 else
                 {
@@ -437,28 +461,10 @@ main(int argc, char** argv)
                 }
                 continue;
             }
-            loggingf("Received(%d) -> " HEADER_FMT "\n", fds[conn].fd, HEADER_ARG(header));
+            loggingf("Received(%d): " HEADER_FMT "\n", fds[conn].fd, HEADER_ARG(header));
 
             // Authentication
-            if (header.id)
-            {
-                client = getClientByID(clients, nclients, header.id);
-                if (!client)
-                {
-                    loggingf("No client for id %d\n", fds[conn].fd);
-
-                    header.type = HEADER_TYPE_ERROR;
-                    ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
-
-                    sendAnyMessage(fds[conn].fd, header, &message);
-
-                    // Reject connection
-                    fds[conn].fd = -1;
-                    close(fds[conn].fd);
-                    continue;
-                }
-            }
-            else
+            if (!header.id)
             {
                 loggingf("No client for connection(%d)\n", fds[conn].fd);
 
@@ -466,10 +472,10 @@ main(int argc, char** argv)
 
                 if (!client)
                     loggingf("Could not initialize client (%d)\n", fds[conn].fd);
-                else if (!client->bifd)
+                /* This is the first time a message is sent, because unifd is not yet set. */
+                else if (!client->unifd)
                 {
-                    // Send connected message to other clients if this was the first time -> bifd is
-                    // not set yet.
+                    loggingf("Send connected message\n");
                     local_persist HeaderMessage header = HEADER_INIT(HEADER_TYPE_PRESENCE);
                     header.id = client->id;
                     PresenceMessage message = {.type = PRESENCE_TYPE_CONNECTED};
@@ -478,12 +484,28 @@ main(int argc, char** argv)
                 continue;
             }
 
+            client = getClientByID(clients, nclients, header.id);
+            if (!client)
+            {
+                loggingf("No client for id %d\n", fds[conn].fd);
+
+                header.type = HEADER_TYPE_ERROR;
+                ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
+
+                sendAnyMessage(fds[conn].fd, header, &message);
+
+                // Reject connection
+                fds[conn].fd = -1;
+                close(fds[conn].fd);
+                continue;
+            }
+
             switch (header.type) {
             /* Send text message to all other clients */
             case HEADER_TYPE_TEXT:
             {
                 TextMessage* text_message = recvTextMessage(&msgsArena, fds[conn].fd);
-                loggingf("Received(%d)", fds[conn].fd);
+                loggingf("Received(%d): ", fds[conn].fd);
                 printTextMessage(text_message, client, 0);
 
                 sendToOthers(clients, nclients, client, UNIFD, &header, text_message);
@@ -491,12 +513,26 @@ main(int argc, char** argv)
             /* Send back client information */
             case HEADER_TYPE_ID:
             {
+                IDMessage id_message;
+                s32 nrecv = recv(fds[conn].fd, &id_message, sizeof(id_message), 0);
+                assert(nrecv == sizeof(id_message));
+
+                client = getClientByID(clients, nclients, id_message.id);
+                if (!client)
+                {
+                    header.type = HEADER_TYPE_ERROR;
+                    ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
+                    s32 nsend = sendAnyMessage(fds[conn].fd, header, &message);
+                    assert(nsend != -1);
+                    break;
+                }
+
                 HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
                 IntroductionMessage introduction_message;
                 header.id = client->id;
                 memcpy(introduction_message.author, client->author, AUTHOR_LEN);
 
-                s32 nrecv = sendAnyMessage(fds[conn].fd, header, &introduction_message);
+                nrecv = sendAnyMessage(fds[conn].fd, header, &introduction_message);
                 assert(nrecv != -1);
             } break;
             default:

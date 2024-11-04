@@ -19,6 +19,9 @@ The idea is the following:
 - [x] id2string on clients
 - [x] ctrl+z to suspend
 - [ ] bug(tb_printf_wrap): text after pfx is wrapped one too soon
+- [ ] bug: when reconnecting nrecv != -1
+- [ ] bug: when disconnecting
+- [ ] use error type success to say that authentication succeeded
 
 ## server
 - [x] import clients
