@@ -1,7 +1,7 @@
 all: chatty server send
 
 clean:
-	rm -f server chatty send _id _clients
+	rm -f server chatty send tags *.log _*
 
 chatty:
 	gcc -ggdb -Wall -pedantic -std=c99 -o chatty chatty.c

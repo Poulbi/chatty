@@ -18,7 +18,7 @@ main(int argc, char** argv)
         return 1;
     }
 
-    s32 err, serverfd, nsend, nrecv;
+    s32 err, serverfd;
 
     serverfd = socket(AF_INET, SOCK_STREAM, 0);
     assert(serverfd != -1);
@@ -38,17 +38,15 @@ main(int argc, char** argv)
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
         IntroductionMessage message;
         memcpy(message.author, argv[1], author_len);
-        nsend = send(serverfd, &header, sizeof(header), 0);
-        assert(nsend != -1);
-        nsend = send(serverfd, &message, sizeof(message), 0);
+        s32 nsend = sendAnyMessage(serverfd, header, &message);
         assert(nsend != -1);
 
         // Get id
-        nrecv = recv(serverfd, &header, sizeof(header), 0);
+        IDMessage id_message;
+        s32 nrecv = recvAnyMessageType(serverfd, &header, &id_message, HEADER_TYPE_ID);
         assert(nrecv != -1);
-        assert(header.type == HEADER_TYPE_ID);
-        id = header.id;
-        fprintf(stderr, "Got id: %lu\n", header.id);
+        fprintf(stderr, "Got id: %lu\n", id_message.id);
+        id = id_message.id;
     }
 
     // convert text to wide string
@@ -64,7 +62,7 @@ main(int argc, char** argv)
     bzero(&message, TEXTMESSAGE_SIZE);
     message = (TextMessage){.timestamp = time(NULL), .len = text_len};
 
-    nsend = send(serverfd, &header, sizeof(header), 0);
+    s32 nsend = send(serverfd, &header, sizeof(header), 0);
     assert(nsend != -1);
     fprintf(stderr, "header bytes sent: %d\n", nsend);
 

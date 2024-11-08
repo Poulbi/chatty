@@ -9,22 +9,12 @@ The idea is the following:
 - authentication
 
 ## client
-- [x] prompt
-- [x] sending message
-- [x] bug: do not allow sending empty message
-- [x] wrapping messages
-- [x] bug: when sending message after diconnect (serverfd?)
-- [x] Handle disconnection thiin a thread, the best way would be
-- [x] Add limit_y to printf_wrap
-- [x] id2string on clients
-- [x] ctrl+z to suspend
-- [ ] bug(tb_printf_wrap): text after pfx is wrapped one too soon
-- [ ] bug: when reconnecting nrecv != -1
-- [ ] bug: when disconnecting
-- [ ] use error type success to say that authentication succeeded
+- [ ] bug: when connecting two clients of the same account
+- [ ] bug: wrapping does not work and displays nothing if there is no screen space
+- [ ] bug: reconnect does not work when server does not know id
+- [ ] markup for messages
 
 ## server
-- [x] import clients
 - [ ] check that fds arena does not overflow
 - [ ] check if when sending and the client is offline (due to connection loss) what happens
 - [ ] timeout on recv?
@@ -37,41 +27,16 @@ The idea is the following:
       negotiated.
 
 ## common
-- [x] handle messages that are too large
-- [x] refactor i&self into conn
-- [x] logging
-- [x] Req|Inf connection per client
-- [x] connect/disconnect messages
-- [ ] bug: blocking after `Added pollfd`, after importing a client and then connecting with the
-  id/or without?  After reconnection fails chatty blocks (remove sleep)
-- [ ] connect/disconnections messages
 - [ ] use IP address / domain
 - [ ] chat history
-- [ ] asserting, logging if fail / halt execution
+- [ ] rooms
 - [ ] compression
 
 ## Protocol
 - see `protocol.h` for more info
-- [ ] make sections per message
-- request chat logs from a certain point up to now (history)
-- connect to a specific room
 
 - The null terminator must be sent with the string.
 - The text can be arbitrary length
-
-## Arena's
-1. There is an arena for the messages' texts (`msgTextArena`) and an arena for the messages
-   (`msgsArena`).
-2. The `Message.text` pointer will point to a text buffer entry in `msgTextArena`
-3. Good way to do this, if you have message `M`.
-```c
-M.text = ArenaPush(msgTextArena, M.text_len);
-```
-Notice, that this depends on knowing the text's length before allocating the memory.
-
-## Strings
-- the length of a string (eg. `Message.text_len`) always **excludes** the null terminator unless stated explicitly
-- the `#define *_LEN` are the max length **including** the null terminator 
 
 ## Keybinds
 - `Ctrl+C` | `Ctrl+D`: quits
