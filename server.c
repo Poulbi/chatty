@@ -471,7 +471,11 @@ main(int argc, char** argv)
                 client = authenticate(&clientsArena, clients_file, fds + conn, header);
 
                 if (!client)
+                {
                     loggingf("Could not initialize client (%d)\n", fds[conn].fd);
+                    close(fds[conn].fd);
+                    fds[conn].fd = -1;
+                }
                 /* This is the first time a message is sent, because unifd is not yet set. */
                 else if (!client->unifd)
                 {
