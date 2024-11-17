@@ -2,6 +2,7 @@
 #include "protocol.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
@@ -15,7 +16,7 @@
 // timeout on polling
 #define TIMEOUT 60 * 1000
 // max pending connections
-#define MAX_CONNECTIONS 16
+#define MAX_CONNECTIONS 1600
 // Get number of connections from arena position
 // NOTE: this is somewhat wrong, because of when disconnections happen
 #define FDS_SIZE (fdsArena.pos / sizeof(struct pollfd))
@@ -442,7 +443,10 @@ main(int argc, char** argv)
             // We received a message, try to parse the header
             HeaderMessage header;
             s32 nrecv = recv(fds[conn].fd, &header, sizeof(header), 0);
-            assert(nrecv != -1);
+            if(nrecv == -1)
+            {
+                loggingf("Received error from fd: %d, errno: %d\n", fds[conn].fd, errno);
+            };
 
             Client* client;
             if (nrecv != sizeof(header))

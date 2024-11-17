@@ -13,6 +13,7 @@ The idea is the following:
 - [ ] bug: wrapping does not work and displays nothing if there is no screen space
 - [ ] bug: reconnect does not work when server does not know id
 - [ ] markup for messages
+- [ ] convert tabs to spaces
 
 ## server
 - [ ] check that fds arena does not overflow
