@@ -1,16 +1,13 @@
 #define TB_IMPL
 #include "termbox2.h"
 
-#include "chatty.h"
-#include "protocol.h"
-#include "ui.c"
-
 #include <arpa/inet.h>
 #include <assert.h>
 #include <locale.h>
 #include <poll.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 
 #define TIMEOUT_POLL 60 * 1000
 // time to reconnect in seconds
@@ -22,6 +19,12 @@
 #define LOGFILE "chatty.log"
 // enable logging
 #define LOGGING
+
+#define DEBUG
+
+#include "chatty.h"
+#include "protocol.h"
+#include "ui.c"
 
 enum { FDS_BI = 0, // for one-way communication with the server (eg. TextMessage)
        FDS_UNI,      // For two-way communication with the server (eg. IDMessage)
@@ -35,6 +38,11 @@ typedef struct {
 } User;
 #define USER_FMT "[%s](%lu)"
 #define USER_ARG(client) client.Author, client.ID
+
+typedef struct { 
+    s32 NumRead;
+    u32 Error;
+} command_output;
 
 // User used by chatty
 global_variable User user = {0};
@@ -51,11 +59,11 @@ fillstr(u32* Str, u32 ch, u32 Len)
 
 // Centered popup displaying message in the appropriate cololrs
 void
-popup(u32 fg, u32 bg, char* text)
+popup(u32 fg, u32 bg, u8* text)
 {
-    u32 len = strlen(text);
+    u32 len = strlen((char*)text);
     assert(len > 0);
-    tb_print(global.width / 2 - len / 2, global.height / 2, fg, bg, text);
+    tb_print(global.width / 2 - len / 2, global.height / 2, fg, bg, (char*)text);
 }
 
 // Returns client in clientsArena matching id
@@ -213,6 +221,56 @@ thread_reconnect(void* fds_ptr)
     return 0;
 }
 
+command_output
+run_command_get_output(char *Command, char *Argv[], u8 *OutputBuffer, int Len)
+{
+    command_output Result = {0};
+
+    int CommandPipe[2];
+    int Error = pipe(CommandPipe);
+    assert(Error != -1);
+
+    int Pid = fork();
+    assert(Pid != -1);
+
+    // Run command in child
+    if (!Pid)
+    {
+        dup2(CommandPipe[1], STDOUT_FILENO); //redirect stdout to Pipe
+        close(CommandPipe[0]);
+        close(CommandPipe[1]);
+
+        int fd = open("/dev/null", O_WRONLY);
+        dup2(fd, STDERR_FILENO);
+
+        execvp(Command, Argv);
+    }
+
+    // Wait for child
+    int statval;
+    waitpid(Pid, &statval, 0);
+
+    if(WIFEXITED(statval))
+    {
+        int ExitCode = WEXITSTATUS(statval);
+        if (ExitCode)
+        {
+            Result.Error = ExitCode;
+        }
+    }
+    else
+    {
+        Result.Error = 1;
+        return Result;
+    }
+
+    close(CommandPipe[1]);
+
+    Result.NumRead = read(CommandPipe[0], OutputBuffer, Len);
+    assert(Result.NumRead != -1);
+
+    return Result;
+}
 // home screen, the first screen the user sees
 // it displays a prompt with the user input of input_len wide characters
 // and the received messages from msgsArena
@@ -250,7 +308,7 @@ screen_home(Arena* ScratchArena,
     //  03:24:33 [TlasT]     │ I am fine
     //  03:24:33 [Fin]       │ I am too
     {
-        u32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
+        s32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
 
         u32 FreeHeight = global.height - box_height;
         if (FreeHeight <= 0)
@@ -333,7 +391,7 @@ screen_home(Arena* ScratchArena,
                 tb_printf(TIMESTAMP_LEN, MessageY, fg, 0, "[%s]", client->Author);
 
                 // Only display when there is enough space
-                if (global.width >  VerticalBarOffset + 2)
+                if (global.width > VerticalBarOffset + 2)
                 {
                     raw_result RawText = markdown_to_raw(ScratchArena, (u32*)&message->text, message->len);
                     markdown_formatoptions MDFormat = preprocess_markdown(ScratchArena,
@@ -460,7 +518,7 @@ screen_home(Arena* ScratchArena,
         if (fds[FDS_UNI].fd == -1 || fds[FDS_BI].fd == -1)
         {
             // show error popup
-            popup(TB_RED, TB_BLACK, "Server disconnected.");
+            popup(TB_RED, TB_BLACK, (u8*)"Server disconnected.");
         }
     }
 }
@@ -670,7 +728,39 @@ main(int argc, char** argv)
                 kill(pid, SIGSTOP);
                 tb_init();
             } break;
+            case TB_KEY_CTRL_Y: // Paste clipboard contents to input
+            {
+                u32 OutputBufferLen = INPUT_LIMIT - InputLen;
+                if (OutputBufferLen <= 0) break;
 
+                u8 OutputBuffer[OutputBufferLen];
+
+                char *PathName = "xclip";
+                char *Argv[] = {PathName, "-o", "-sel", "c", 0};
+
+                command_output Output = run_command_get_output(PathName, Argv, OutputBuffer, OutputBufferLen - 1);
+                if (Output.Error) break;
+
+                // Remove trailing whitespace
+                int BufferIndex = Output.NumRead - 1;
+                while (BufferIndex > 0 &&
+                        (OutputBuffer[BufferIndex] == '\n' ||
+                         OutputBuffer[BufferIndex] == '\t'))
+                {
+                    OutputBuffer[BufferIndex] = 0;
+                    BufferIndex--;
+                }
+
+                // Append to output
+                for (s32 BufferIndex = 0; BufferIndex < Output.NumRead; BufferIndex++)
+                {
+                    // convert u8 to u32
+                    u32 ch = OutputBuffer[BufferIndex];
+                    Input[InputLen] = ch;
+                    InputLen++;
+                }
+
+            } break;
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
                 quit = 1;
