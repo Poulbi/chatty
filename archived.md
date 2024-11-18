@@ -11,6 +11,8 @@
 - [x] bug: when reconnecting nrecv != -1
 - [x] bug: when disconnecting
 - [x] use error type success to say that authentication succeeded
+- [x] markup for messages
+- [x] clipboard shortcut
 
 ## Server
 - [x] import clients

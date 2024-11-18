@@ -12,7 +12,6 @@ The idea is the following:
 - [ ] bug: when connecting two clients of the same account
 - [ ] bug: wrapping does not work and displays nothing if there is no screen space
 - [ ] bug: reconnect does not work when server does not know id
-- [ ] markup for messages
 - [ ] convert tabs to spaces
 
 ## server
@@ -43,6 +42,7 @@ The idea is the following:
 - `Ctrl+C` | `Ctrl+D`: quits
 - `Ctrl+U`: Erase input line
 - `Ctrl+W`: Erase word behind cursor
+- `Ctrl+Y`: Paste clipboard into input field
 
 ## Resources I used for building this
 - source code I looked at:
