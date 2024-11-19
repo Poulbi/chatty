@@ -207,20 +207,27 @@ tb_print_wrapped_with_markdown(u32 XOffset, u32 YOffset, u32 fg, u32 bg,
 
 // Return string without markdown markup characters using `is_markdown()`
 // ScratchArena is used to allocate space for the raw text
+// If ScratchArena is null then it will only return then length of the raw string
 // Len should be characters + null terminator
 // Copies the null terminator as well
 raw_result
 markdown_to_raw(Arena* ScratchArena, u32* Text, u32 Len)
 {
     raw_result Result = {0};
-    Result.Text = ScratchArena->addr;
+    if (ScratchArena)
+    {
+        Result.Text = ScratchArena->addr;
+    }
 
     for (u32 i = 0; i < Len; i++)
     {
         if (!is_markdown(Text[i]))
         {
-            u32* ch = ArenaPush(ScratchArena, sizeof(*ch));
-            *ch = Text[i];
+            if (ScratchArena)
+            {
+                u32* ch = ArenaPush(ScratchArena, sizeof(*ch));
+                *ch = Text[i];
+            }
             Result.Len++;
         }
     }

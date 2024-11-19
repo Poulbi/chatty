@@ -19,6 +19,8 @@
 #define LOGFILE "chatty.log"
 // enable logging
 #define LOGGING
+// Number of spaces inserted when pressing Tab/Ctrl+I
+#define TAB_WIDTH 4
 
 #define DEBUG
 
@@ -761,12 +763,25 @@ main(int argc, char** argv)
                 }
 
             } break;
+            case TB_KEY_CTRL_I:
+            {
+                for (u32 i = 0;
+                    i < TAB_WIDTH && InputLen < INPUT_LIMIT - 1;
+                    i++)
+                {
+                    Input[InputLen] = L' ';
+                    InputLen++;
+                }
+            } break;
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
                 quit = 1;
                 break;
             case TB_KEY_CTRL_M: // send message
-                if (InputLen == 0)
+            {
+                raw_result RawText = markdown_to_raw(0, Input, InputLen);
+
+                if (RawText.Len == 0)
                     // do not send empty message
                     break;
                 if (fds[FDS_UNI].fd == -1)
@@ -796,6 +811,7 @@ main(int argc, char** argv)
 
                 MessagesNum++;
                 // also clear input
+            } // fallthrough
             case TB_KEY_CTRL_U: // clear input
                 bzero(Input, InputLen * sizeof(*Input));
                 InputLen = 0;
