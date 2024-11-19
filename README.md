@@ -13,9 +13,11 @@ The idea is the following:
 - [ ] bug: wrapping does not work and displays nothing if there is no screen space
 - [ ] bug: reconnect does not work when server does not know id
 - [ ] convert tabs to spaces
+- [ ] newline support
 
 ## server
 - [ ] check that fds arena does not overflow
+    - free clients which disconnected and use free list to give them space
 - [ ] check if when sending and the client is offline (due to connection loss) what happens
 - [ ] timeout on recv?
 - [ ] use threads to handle clients/ timeout when receiving because a client could theoretically

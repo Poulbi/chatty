@@ -13,6 +13,8 @@
 - [x] use error type success to say that authentication succeeded
 - [x] markup for messages
 - [x] clipboard shortcut
+- [x] tab as spaces support
+- [x] fixed empty messages with markup characters
 
 ## Server
 - [x] import clients
