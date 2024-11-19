@@ -182,13 +182,13 @@ tb_print_wrapped_with_markdown(u32 XOffset, u32 YOffset, u32 fg, u32 bg,
 
     for (u32 TextIndex = 0; TextIndex < Len; TextIndex++)
     {
-        if (MDFormat.Len &&
+        if (MDFormatOptionsIndex < MDFormat.Len &&
             TextIndex == MDFormat.Options[MDFormatOptionsIndex].Position)
         {
             fg ^= MDFormat.Options[MDFormatOptionsIndex].Color;
             MDFormatOptionsIndex++;
         }
-        if (WrapPositionsLen &&
+        if (WrapPositionsIndex < WrapPositionsLen &&
             TextIndex == WrapPositions[WrapPositionsIndex])
         {
             Y++;
