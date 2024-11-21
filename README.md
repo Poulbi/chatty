@@ -6,6 +6,8 @@ The idea is the following:
 - client for reading the messages and sending them at the same time
 - rooms
 - encryption
+    - ChaCha20-Poly1305
+    - AES
 - authentication
 
 ## client
@@ -13,7 +15,9 @@ The idea is the following:
 - [ ] bug: wrapping does not work and displays nothing if there is no screen space
 - [ ] bug: reconnect does not work when server does not know id
 - [ ] convert tabs to spaces
+- [ ] bug: when using lots of markup characters
 - [ ] newline support
+    - [ ] resizable box
 
 ## server
 - [ ] check that fds arena does not overflow
