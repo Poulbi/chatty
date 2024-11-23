@@ -211,7 +211,7 @@ tb_print_wrapped_with_markdown(u32 XOffset, u32 YOffset, u32 fg, u32 bg,
 // Len should be characters + null terminator
 // Copies the null terminator as well
 raw_result
-markdown_to_raw(Arena* ScratchArena, u32* Text, u32 Len)
+markdown_to_raw(Arena* ScratchArena, wchar_t* Text, u32 Len)
 {
     raw_result Result = {0};
     if (ScratchArena)
@@ -239,7 +239,7 @@ markdown_to_raw(Arena* ScratchArena, u32* Text, u32 Len)
 // Use Scratcharena to make allocations on that buffer, The Maximimum space needed is Len, eg. when
 // the string is only markup characters.
 markdown_formatoptions
-preprocess_markdown(Arena* ScratchArena, u32* Text, u32 Len)
+preprocess_markdown(Arena* ScratchArena, wchar_t* Text, u32 Len)
 {
     markdown_formatoptions Result = {0};
     Result.Options = (format_option*)((u8*)ScratchArena->addr + ScratchArena->pos);
@@ -293,4 +293,134 @@ preprocess_markdown(Arena* ScratchArena, u32* Text, u32 Len)
     }
 
     return Result;
+}
+
+void
+InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
+              wchar_t *Text, u32 TextLen,
+              Bool Focused)
+{
+    //  ╭───────╮
+    // M│P....█P│M
+    //  ╰───────╯
+    // . -> text
+    // █ -> cursor
+    // P -> padding (symmetric)
+    // M -> margin (symmetric)
+
+    // Configuration options
+    u32 MarginX = 1;
+    u32 PaddingX = 1;
+    u32 MinTextSpace = 3;
+    u32 BorderWidth = 1;
+
+    // TODO: return early if there is not enough space
+    if (BoxHeight < 3)
+        return;
+    if (BoxWidth < MarginX * 2 + PaddingX * 2 + MinTextSpace)
+        return;
+
+    // Get 0-based coordinate
+    BoxWidth -= 2* MarginX;
+    BoxHeight--;
+
+    wchar_t ur = L'╭';
+    wchar_t ru = L'╯';
+    wchar_t rd = L'╮';
+    wchar_t dr = L'╰';
+    wchar_t lr = L'─';
+    wchar_t ud = L'│';
+
+    // Draw Borders
+    {
+        // Draw the top bar
+        tb_printf(BoxX + MarginX, BoxY, 0, 0, "%lc", ur);
+        for (u32 X = 1;
+             X < BoxWidth;
+             X++)
+        {
+            tb_printf(BoxX + X + MarginX, BoxY, 0, 0, "%lc", lr);
+        }
+        tb_printf(BoxX + BoxWidth + MarginX, BoxY, 0, 0, "%lc", rd);
+
+        // Draw vertical bars
+        for (u32 Y = 1;
+             Y < BoxHeight;
+             Y++)
+        {
+            tb_printf(BoxX + MarginX, BoxY + Y, 0, 0, "%lc", ud);
+            tb_printf(BoxX + BoxWidth + MarginX, BoxY + Y, 0, 0, "%lc", ud);
+        }
+
+        // Draw the bottom bar
+        tb_printf(BoxWidth + MarginX, BoxY + BoxHeight, 0, 0, "%lc", ru);
+        for (u32 X = 1;
+             X < BoxWidth;
+             X++)
+        {
+            tb_printf(BoxX + X + MarginX, BoxY + BoxHeight, 0, 0, "%lc", lr);
+        }
+        tb_printf(BoxX + MarginX, BoxY + BoxHeight, 0, 0, "%lc", dr);
+    }
+
+    // Draw the text
+    u32 TextX = BoxX + MarginX + PaddingX + 1;
+    u32 TextY = BoxY + 1;
+    u32 TextWidth = BoxWidth - TextX - MarginX + 1;
+    u32 TextHeight = BoxHeight - BorderWidth * 2 + 1;
+    u32 TextDisplaySize = TextWidth * TextHeight;
+
+    u32 At = 0;
+    // If there is not enough space to fit the text scroll one line by advancing by textwidth.
+    if (TextLen >= TextDisplaySize)
+    {
+        // TextHeight - 1 : scroll by one line
+        At = (TextLen / TextWidth - (TextHeight - 1))  * TextWidth;
+    }
+
+#ifdef DEBUG
+    tb_printf(BoxX + 1, BoxY, 0, 0, "%d/%d %dx%d %d", TextLen, MAX_INPUT_LEN, TextWidth, TextHeight, At);
+#endif
+
+    // Keep if needed for cursor position
+    u32 XOffset = 0, YOffset = 0;
+    while (At < TextLen)
+    {
+        for (YOffset = 0;
+             YOffset < TextHeight && At < TextLen;
+             YOffset++)
+        {
+            for (XOffset = 0;
+                 XOffset < TextWidth && At < TextLen;
+                 XOffset++)
+            {
+                tb_printf(TextX + XOffset, TextY + YOffset, 0, 0, "%lc", Text[At]);
+                At++;
+            }
+        }
+    }
+
+    // Set the cursor
+    if (Focused)
+    {
+        if (TextLen == 0)
+        {
+            // When there is no text
+            global.cursor_x = TextX;
+            global.cursor_y = TextY;
+        }
+        else if (TextLen % TextWidth == 0)
+        {
+            // When at the end of width put the cursor on the next line
+            global.cursor_x = TextX;
+            global.cursor_y = TextY + YOffset;
+        }
+        else
+        {
+            // Put cursor after the text
+            // Minus one because of the for loop
+            global.cursor_x = (TextX-1) + XOffset + 1;
+            global.cursor_y = (TextY-1) + YOffset;
+        }
+    }
 }

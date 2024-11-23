@@ -1,5 +1,5 @@
 #define TB_IMPL
-#include "termbox2.h"
+#include "external/termbox2.h"
 
 #include <arpa/inet.h>
 #include <assert.h>
@@ -12,7 +12,7 @@
 #define TIMEOUT_POLL 60 * 1000
 // time to reconnect in seconds
 #define TIMEOUT_RECONNECT 1
-#define INPUT_LIMIT 512
+#define MAX_INPUT_LEN 512
 // Filepath where user ID is stored
 #define ID_FILE "_id"
 // Filepath where logged
@@ -26,7 +26,7 @@
 
 #include "chatty.h"
 #include "protocol.h"
-#include "ui.c"
+#include "ui.h"
 
 enum { FDS_BI = 0, // for one-way communication with the server (eg. TextMessage)
        FDS_UNI,      // For two-way communication with the server (eg. IDMessage)
@@ -273,6 +273,7 @@ run_command_get_output(char *Command, char *Argv[], u8 *OutputBuffer, int Len)
 
     return Result;
 }
+
 // home screen, the first screen the user sees
 // it displays a prompt with the user input of input_len wide characters
 // and the received messages from msgsArena
@@ -280,28 +281,18 @@ void
 screen_home(Arena* ScratchArena,
             Arena* MessagesArena, u32 MessagesNum,
             Arena* ClientsArena, struct pollfd* fds,
-            u32 Input[], u32 InputLen)
+            wchar_t Input[], u32 InputLen)
 {
-    // config options
-    const s32 box_max_len = 80;
-    const s32 box_x = 0, box_y = global.height - 3, box_pad_x = 1, box_mar_x = 1, box_bwith = 1, box_height = 3;
-    const u32 prompt_x = box_x + box_pad_x + box_mar_x + box_bwith + InputLen;
+    u32 BoxHeight = 3;
+    u32 BoxWidth = global.width - 1;
 
-    // the minimum height required is the hight for the box prompt
-    // the minimum width required is that one character should fit in the box prompt
-    if (global.height < box_height ||
-        global.width < (box_x + box_mar_x * 2 + box_pad_x * 2 + box_bwith * 2 + 1))
+    if (global.height < BoxHeight ||
+        global.width < 8)
     {
-        // + 1 for cursor
         tb_hide_cursor();
         return;
     }
-    else
-    {
-        // show cursor
-        // TODO: show cursor as block character instead of using the real cursor
-        bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
-    }
+
 
     // Print messages in msgsArena, if there are too many to display, start printing from an offset.
     // Looks like this:
@@ -312,7 +303,7 @@ screen_home(Arena* ScratchArena,
     {
         s32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
 
-        u32 FreeHeight = global.height - box_height;
+        u32 FreeHeight = global.height - BoxHeight;
         if (FreeHeight <= 0)
             goto draw_prompt;
 
@@ -395,9 +386,9 @@ screen_home(Arena* ScratchArena,
                 // Only display when there is enough space
                 if (global.width > VerticalBarOffset + 2)
                 {
-                    raw_result RawText = markdown_to_raw(ScratchArena, (u32*)&message->text, message->len);
+                    raw_result RawText = markdown_to_raw(ScratchArena, (wchar_t*)&message->text, message->len);
                     markdown_formatoptions MDFormat = preprocess_markdown(ScratchArena,
-                                                                          (u32*)&message->text,
+                                                                          (wchar_t*)&message->text,
                                                                           message->len);
 
                     u32 timesWrapped = tb_print_wrapped_with_markdown(VerticalBarOffset + 2, MessageY, fg, 0,
@@ -455,67 +446,11 @@ screen_home(Arena* ScratchArena,
             tb_print(VerticalBarOffset, Y, 0, 0, "│");
 
     draw_prompt:
-        // Draw prompt box which is a box made out of
-        // should look like this: ╭───────╮
-        //                        │ text█ │
-        //                        ╰───────╯
-        // the text is padded to the left and right by box_pad_x
-        // the middle/inner part is opaque
-        // TODO: wrapping when the text is bigger & alternated with scrolling when there is not
-        // enough space.
-        {
-            u32 box_len = 0;
-            if (global.width >= box_max_len + 2 * box_mar_x)
-                box_len = box_max_len;
-            else
-                box_len = global.width - box_mar_x * 2;
+        InputBox(0, FreeHeight, BoxWidth, BoxHeight,
+                 Input, InputLen,
+                 True);
+        bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
 
-            // +2 for corners and null terminator
-            u32 box_up[box_len + 1];
-            u32 box_in[box_len + 1];
-            u32 box_down[box_len + 1];
-            u32 lr = L'─', ur = L'╭', rd = L'╮', dr = L'╰', ru = L'╯', ud = L'│';
-
-            // top bar
-            box_up[0] = ur;
-            fillstr(box_up + 1, lr, box_len - 1);
-            box_up[box_len - 1] = rd;
-            box_up[box_len] = 0;
-            // inner part
-            fillstr(box_in + 1, L' ', box_len - 1);
-            box_in[0] = ud;
-            box_in[box_len - 1] = ud;
-            box_in[box_len] = 0;
-            // bottom bar
-            box_down[0] = dr;
-            fillstr(box_down + 1, lr, box_len - 1);
-            box_down[box_len - 1] = ru;
-            box_down[box_len] = 0;
-
-            tb_printf(box_x + box_mar_x, box_y, 0, 0, "%ls", box_up);
-            tb_printf(box_x + box_mar_x, box_y + 1, 0, 0, "%ls", box_in);
-            tb_printf(box_x + box_mar_x, box_y + 2, 0, 0, "%ls", box_down);
-
-            global.cursor_y = box_y + 1;
-
-            // NOTE: wrapping would be better.
-            // Scroll the text when it exceeds the prompt's box length
-            u32 freesp = box_len - box_pad_x * 2 - box_bwith * 2;
-            if (freesp <= 0)
-                return;
-
-            if (InputLen > freesp)
-            {
-                u32* text_offs = Input + (InputLen - freesp);
-                tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", text_offs);
-                global.cursor_x = box_x + box_pad_x + box_mar_x + box_bwith + freesp;
-            }
-            else
-            {
-                global.cursor_x = prompt_x;
-                tb_printf(box_x + box_mar_x + box_pad_x + box_bwith, box_y + 1, 0, 0, "%ls", Input);
-            }
-        }
 
         if (fds[FDS_UNI].fd == -1 || fds[FDS_BI].fd == -1)
         {
@@ -544,8 +479,8 @@ main(int argc, char** argv)
     u32 MessagesNum = 0; // Number of messages in msgsArena
     s32 nrecv = 0;     // number of bytes received
 
-    u32 Input[INPUT_LIMIT] = {0}; // input buffer
-    u32 InputLen = 0;               // number of characters in input
+    wchar_t Input[MAX_INPUT_LEN] = {0}; // input buffer
+    u32 InputIndex = 0;               // number of characters in input
 
     Arena ScratchArena;
     Arena MessagesArena;
@@ -632,7 +567,10 @@ main(int argc, char** argv)
     tb_init();
     tb_get_fds(&fds[FDS_TTY].fd, &fds[FDS_RESIZE].fd);
 
-    screen_home(&ScratchArena, &MessagesArena, MessagesNum, &ClientsArena, fds, Input, InputLen);
+    screen_home(&ScratchArena,
+                &MessagesArena, MessagesNum,
+                &ClientsArena, fds,
+                Input, InputIndex);
     tb_present();
 
     // main loop
@@ -703,24 +641,24 @@ main(int argc, char** argv)
             {
             case TB_KEY_CTRL_W:
                 // delete consecutive whitespace
-                while (InputLen)
+                while (InputIndex)
                 {
-                    if (Input[InputLen - 1] == L' ')
+                    if (Input[InputIndex - 1] == L' ')
                     {
-                        Input[InputLen - 1] = 0;
-                        InputLen--;
+                        Input[InputIndex - 1] = 0;
+                        InputIndex--;
                         continue;
                     }
                     break;
                 }
                 // delete until whitespace
-                while (InputLen)
+                while (InputIndex)
                 {
-                    if (Input[InputLen - 1] == L' ')
+                    if (Input[InputIndex - 1] == L' ')
                         break;
                     // erase
-                    Input[InputLen - 1] = 0;
-                    InputLen--;
+                    Input[InputIndex - 1] = 0;
+                    InputIndex--;
                 }
                 break;
             case TB_KEY_CTRL_Z:
@@ -732,7 +670,7 @@ main(int argc, char** argv)
             } break;
             case TB_KEY_CTRL_Y: // Paste clipboard contents to input
             {
-                u32 OutputBufferLen = INPUT_LIMIT - InputLen;
+                u32 OutputBufferLen = MAX_INPUT_LEN - InputIndex;
                 if (OutputBufferLen <= 0) break;
 
                 u8 OutputBuffer[OutputBufferLen];
@@ -758,28 +696,31 @@ main(int argc, char** argv)
                 {
                     // convert u8 to u32
                     u32 ch = OutputBuffer[BufferIndex];
-                    Input[InputLen] = ch;
-                    InputLen++;
+                    Input[InputIndex] = ch;
+                    InputIndex++;
                 }
 
             } break;
             case TB_KEY_CTRL_I:
             {
                 for (u32 i = 0;
-                    i < TAB_WIDTH && InputLen < INPUT_LIMIT - 1;
+                    i < TAB_WIDTH && InputIndex < MAX_INPUT_LEN - 1;
                     i++)
                 {
-                    Input[InputLen] = L' ';
-                    InputLen++;
+                    Input[InputIndex] = L' ';
+                    InputIndex++;
                 }
             } break;
+            case TB_KEY_BACKSPACE2:
+                if (InputIndex) InputIndex--;
+                break;
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
                 quit = 1;
                 break;
             case TB_KEY_CTRL_M: // send message
             {
-                raw_result RawText = markdown_to_raw(0, Input, InputLen);
+                raw_result RawText = markdown_to_raw(0, Input, InputIndex);
 
                 if (RawText.Len == 0)
                     // do not send empty message
@@ -789,8 +730,8 @@ main(int argc, char** argv)
                     break;
 
                 // null terminate
-                Input[InputLen] = 0;
-                InputLen++;
+                Input[InputIndex] = 0;
+                InputIndex++;
 
                 // Save header
                 HeaderMessage* header = ArenaPush(&MessagesArena, sizeof(*header));
@@ -801,9 +742,9 @@ main(int argc, char** argv)
                 // Save message
                 TextMessage* sendmsg = ArenaPush(&MessagesArena, TEXTMESSAGE_SIZE);
                 sendmsg->timestamp = time(0);
-                sendmsg->len = InputLen;
+                sendmsg->len = InputIndex;
 
-                u32 text_size = InputLen * sizeof(*Input);
+                u32 text_size = InputIndex * sizeof(*Input);
                 ArenaPush(&MessagesArena, text_size);
                 memcpy(&sendmsg->text, Input, text_size);
 
@@ -813,20 +754,20 @@ main(int argc, char** argv)
                 // also clear input
             } // fallthrough
             case TB_KEY_CTRL_U: // clear input
-                bzero(Input, InputLen * sizeof(*Input));
-                InputLen = 0;
+                bzero(Input, InputIndex * sizeof(*Input));
+                InputIndex = 0;
                 break;
             default:
                 if (ev.ch == 0)
                     break;
 
                 // TODO: show error
-                if (InputLen == INPUT_LIMIT - 1) // last byte reserved for \0
+                if (InputIndex == MAX_INPUT_LEN - 1) // last byte reserved for \0
                     break;
 
                 // append key to input buffer
-                Input[InputLen] = ev.ch;
-                InputLen++;
+                Input[InputIndex] = ev.ch;
+                InputIndex++;
             }
             if (quit)
                 break;
@@ -839,7 +780,7 @@ main(int argc, char** argv)
             tb_poll_event(&ev);
         }
 
-        screen_home(&ScratchArena, &MessagesArena, MessagesNum, &ClientsArena, fds, Input, InputLen);
+        screen_home(&ScratchArena, &MessagesArena, MessagesNum, &ClientsArena, fds, Input, InputIndex);
 
         tb_present();
     }
