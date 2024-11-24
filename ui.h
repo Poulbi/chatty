@@ -295,6 +295,28 @@ preprocess_markdown(Arena* ScratchArena, wchar_t* Text, u32 Len)
     return Result;
 }
 
+u32 InputBoxMarginX = 1;
+u32 InputBoxPaddingX = 1;
+#define INPUT_BOX_BORDER_WIDTH 1
+#define INPUT_BOX_MIN_TEXT_WIDTH 1
+#define INPUT_BOX_MIN_TEXT_HEIGHT 1
+
+u32
+GetInputBoxMinimumWidth()
+{
+    return InputBoxPaddingX * 2 +
+           InputBoxMarginX * 2 +
+           INPUT_BOX_BORDER_WIDTH * 2 +
+           INPUT_BOX_MIN_TEXT_WIDTH;
+}
+
+u32
+GetInputBoxMinimumHeight()
+{
+    return INPUT_BOX_BORDER_WIDTH * 2 +
+           INPUT_BOX_MIN_TEXT_HEIGHT;
+}
+
 void
 InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
               wchar_t *Text, u32 TextLen,
@@ -308,17 +330,9 @@ InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
     // P -> padding (symmetric)
     // M -> margin (symmetric)
 
-    // Configuration options
-    u32 MarginX = 1;
-    u32 PaddingX = 1;
-    u32 MinTextSpace = 3;
-    u32 BorderWidth = 1;
-
-    // TODO: return early if there is not enough space
-    if (BoxHeight < 3)
-        return;
-    if (BoxWidth < MarginX * 2 + PaddingX * 2 + MinTextSpace)
-        return;
+    u32 MarginX = InputBoxMarginX;
+    u32 PaddingX = InputBoxPaddingX;
+    u32 BorderWidth = INPUT_BOX_BORDER_WIDTH;
 
     // Get 0-based coordinate
     BoxWidth -= 2* MarginX;
@@ -370,35 +384,63 @@ InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
     u32 TextHeight = BoxHeight - BorderWidth * 2 + 1;
     u32 TextDisplaySize = TextWidth * TextHeight;
 
-    u32 At = 0;
-    // If there is not enough space to fit the text scroll one line by advancing by textwidth.
-    if (TextLen >= TextDisplaySize)
-    {
-        // TextHeight - 1 : scroll by one line
-        At = (TextLen / TextWidth - (TextHeight - 1))  * TextWidth;
-    }
-
-#ifdef DEBUG
-    tb_printf(BoxX + 1, BoxY, 0, 0, "%d/%d %dx%d %d", TextLen, MAX_INPUT_LEN, TextWidth, TextHeight, At);
-#endif
-
-    // Keep if needed for cursor position
+    // XOffset and YOffset are needed for setting the cursor position
     u32 XOffset = 0, YOffset = 0;
-    while (At < TextLen)
+    u32 TextOffset = 0;
+
+    // If there is more than one line, implement vertical wrapping otherwise scroll the text
+    // horizontally.
+    if (TextHeight > 1)
     {
-        for (YOffset = 0;
-             YOffset < TextHeight && At < TextLen;
-             YOffset++)
+        // If there is not enough space to fit the text scroll one line by advancing by textwidth.
+        if (TextLen >= TextDisplaySize)
         {
-            for (XOffset = 0;
-                 XOffset < TextWidth && At < TextLen;
-                 XOffset++)
+            // TextHeight - 1 : scroll by one line
+            TextOffset = (TextLen / TextWidth - (TextHeight - 1))  * TextWidth;
+        }
+
+        // Print the text
+        while (TextOffset < TextLen)
+        {
+            for (YOffset = 0;
+                 YOffset < TextHeight && TextOffset < TextLen;
+                 YOffset++)
             {
-                tb_printf(TextX + XOffset, TextY + YOffset, 0, 0, "%lc", Text[At]);
-                At++;
+                for (XOffset = 0;
+                     XOffset < TextWidth && TextOffset < TextLen;
+                     XOffset++)
+                {
+                    tb_printf(TextX + XOffset, TextY + YOffset, 0, 0, "%lc", Text[TextOffset]);
+                    TextOffset++;
+                }
             }
         }
     }
+    else
+    {
+        // Scrooll the text horizontally
+        if (TextLen >= TextDisplaySize)
+        {
+            TextOffset = TextLen - TextWidth;
+            XOffset = TextWidth;
+        }
+        else
+        {
+            XOffset = TextLen;
+        }
+        YOffset = 1;
+        tb_printf(TextX, TextY, 0, 0, "%ls", Text + TextOffset);
+    }
+
+#ifdef DEBUG
+    tb_printf(BoxX + 1, BoxY, 0, 0, "%d/%d [%dx%d] %dx%d %d (%d,%d)+(%d,%d)",
+            TextLen, MAX_INPUT_LEN,
+            BoxWidth, BoxHeight,
+            TextWidth, TextHeight,
+            TextOffset,
+            TextX, TextY,
+            XOffset, YOffset);
+#endif
 
     // Set the cursor
     if (Focused)
@@ -409,7 +451,7 @@ InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
             global.cursor_x = TextX;
             global.cursor_y = TextY;
         }
-        else if (TextLen % TextWidth == 0)
+        else if (TextLen % TextWidth == 0 && TextHeight > 1)
         {
             // When at the end of width put the cursor on the next line
             global.cursor_x = TextX;
