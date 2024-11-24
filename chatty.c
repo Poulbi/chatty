@@ -22,8 +22,6 @@
 // Number of spaces inserted when pressing Tab/Ctrl+I
 #define TAB_WIDTH 4
 
-#define DEBUG
-
 #include "chatty.h"
 #include "protocol.h"
 #include "ui.h"
@@ -278,21 +276,49 @@ run_command_get_output(char *Command, char *Argv[], u8 *OutputBuffer, int Len)
 // it displays a prompt with the user input of input_len wide characters
 // and the received messages from msgsArena
 void
-screen_home(Arena* ScratchArena,
+DisplayChat(Arena* ScratchArena,
             Arena* MessagesArena, u32 MessagesNum,
             Arena* ClientsArena, struct pollfd* fds,
             wchar_t Input[], u32 InputLen)
 {
-    u32 BoxHeight = 3;
-    u32 BoxWidth = global.width - 1;
+#define MIN_TEXT_WIDTH_FOR_WRAPPING 20
+    u32 BoxHeight = GetInputBoxMinimumHeight();
+    u32 MinBoxWidth = GetInputBoxMinimumWidth();
 
-    if (global.height < BoxHeight ||
-        global.width < 8)
+    u32 BoxWidth = global.width - 1;
+    u32 InputBoxTextWidth = BoxWidth - MinBoxWidth + 2;
+
+    if (InputLen >= InputBoxTextWidth &&
+        InputBoxTextWidth > MIN_TEXT_WIDTH_FOR_WRAPPING)
+    {
+        BoxHeight++;
+    }
+
+    u32 FreeHeight = global.height - BoxHeight;
+
+#undef MIN_TEXT_WIDTH_FOR_WRAPPING
+
+    if (global.height < BoxHeight || global.width < MinBoxWidth)
     {
         tb_hide_cursor();
         return;
     }
+    bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
 
+    InputBox(0, FreeHeight, BoxWidth, BoxHeight,
+             Input, InputLen,
+             True);
+
+    // Print vertical bar
+    s32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
+    for (u32 Y = 0; Y < FreeHeight; Y++)
+        tb_print(VerticalBarOffset, Y, 0, 0, "│");
+
+    // show error popup if server disconnected
+    if (fds[FDS_UNI].fd == -1 || fds[FDS_BI].fd == -1)
+    {
+        popup(TB_RED, TB_BLACK, (u8*)"Server disconnected.");
+    }
 
     // Print messages in msgsArena, if there are too many to display, start printing from an offset.
     // Looks like this:
@@ -301,11 +327,9 @@ screen_home(Arena* ScratchArena,
     //  03:24:33 [TlasT]     │ I am fine
     //  03:24:33 [Fin]       │ I am too
     {
-        s32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
 
-        u32 FreeHeight = global.height - BoxHeight;
-        if (FreeHeight <= 0)
-            goto draw_prompt;
+        // If there is not enough space to draw, do not draw
+        if (FreeHeight <= 0) return;
 
         // Used to go to the next message in MessagesArena by incrementing with the messages' size.
         u8* MessageAddress = MessagesArena->addr;
@@ -441,22 +465,6 @@ screen_home(Arena* ScratchArena,
             }
         }
         
-        // Print vertical bar
-        for (u32 Y = 0; Y < FreeHeight; Y++)
-            tb_print(VerticalBarOffset, Y, 0, 0, "│");
-
-    draw_prompt:
-        InputBox(0, FreeHeight, BoxWidth, BoxHeight,
-                 Input, InputLen,
-                 True);
-        bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
-
-
-        if (fds[FDS_UNI].fd == -1 || fds[FDS_BI].fd == -1)
-        {
-            // show error popup
-            popup(TB_RED, TB_BLACK, (u8*)"Server disconnected.");
-        }
     }
 }
 
@@ -567,7 +575,7 @@ main(int argc, char** argv)
     tb_init();
     tb_get_fds(&fds[FDS_TTY].fd, &fds[FDS_RESIZE].fd);
 
-    screen_home(&ScratchArena,
+    DisplayChat(&ScratchArena,
                 &MessagesArena, MessagesNum,
                 &ClientsArena, fds,
                 Input, InputIndex);
@@ -713,6 +721,7 @@ main(int argc, char** argv)
             } break;
             case TB_KEY_BACKSPACE2:
                 if (InputIndex) InputIndex--;
+                Input[InputIndex] = 0;
                 break;
             case TB_KEY_CTRL_D:
             case TB_KEY_CTRL_C:
@@ -780,7 +789,7 @@ main(int argc, char** argv)
             tb_poll_event(&ev);
         }
 
-        screen_home(&ScratchArena, &MessagesArena, MessagesNum, &ClientsArena, fds, Input, InputIndex);
+        DisplayChat(&ScratchArena, &MessagesArena, MessagesNum, &ClientsArena, fds, Input, InputIndex);
 
         tb_present();
     }
