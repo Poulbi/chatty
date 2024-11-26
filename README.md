@@ -60,3 +60,8 @@ The idea is the following:
 - *unicode and wide characters*: [C for dummies](https://c-for-dummies.com/blog/?p=2578)
 - *sockets*: [Nir Lichtman - Making Minimalist Chat Server in C on Linux](https://www.youtube.com/watch?v=gGfTjKwLQxY)
 - syscall manpages `man`
+
+- https://www.youtube.com/watch?v=wvtFGa6XJDU
+- https://nullprogram.com/blog/2023/02/11/
+- https://nullprogram.com/blog/2023/02/13/
+- https://nullprogram.com/blog/2023/10/08/
