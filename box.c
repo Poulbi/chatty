@@ -79,6 +79,14 @@ Delete(wchar_t* Text, u64 Pos)
             (MAX_INPUT_LEN - Pos - 1) * sizeof(*Text));
 }
 
+Bool
+IsInRect(rect Rect, u32 X, u32 Y)
+{
+    if ((X >= Rect.X && X <= Rect.X + Rect.W) &&
+        (Y >= Rect.Y && Y <= Rect.Y + Rect.H)) return True;
+    return False;
+}
+
 int
 main(void)
 {
@@ -87,7 +95,6 @@ main(void)
 
     tb_init();
 
-    u32 InputPos = 0;
     u32 InputLen = 0;
 
 #if 1
@@ -112,31 +119,54 @@ main(void)
         TextBox.W - 2*BOX_PADDING_X - 2*BOX_BORDER_WIDTH,
         TextBox.H - 2*BOX_BORDER_WIDTH
     };
-    u32 TextSurface = Text.W * Text.H;
 #undef BOX_PADDING_X
 #undef BOX_BORDER_WIDTH
-
-    DrawBox(TextBox, 0);
-
-    // Draw the text
-    u32 XOffset = 0, YOffset = 0;
-    for (u32 At = 0;
-         (At < InputLen) && (At < TextSurface) ;
-         At++)
-    {
-        tb_printf(Text.X + XOffset,
-                  Text.Y + YOffset,
-                  0, 0,
-                  "%lc", Input[At]);
-        XOffset++;
-        if (XOffset == Text.W) { YOffset++; XOffset = 0; }
-    }
+    u32 TextSurface = Text.W * Text.H;
 
     global.cursor_x = Text.X;
     global.cursor_y = Text.Y;
 
+    u32 TextOffset = 0;
+    u32 InputPos = 0;
+
     while (ev.key != TB_KEY_CTRL_C)
     {
+
+        tb_clear();
+
+        DrawBox(TextBox, 0);
+
+        // Draw the text right of the cursor
+        // NOTE: the cursor is assumed to be in the box
+        // assert(IsInRect(Text, global.cursor_x, global.cursor_y));
+        u32 AtX = Text.X, AtY = Text.Y;
+        u32 At = TextOffset;
+        while (AtY < Text.Y + Text.H)
+        {
+            if (At < InputLen) 
+            {
+                tb_printf(AtX++, AtY, 0, 0, "%lc", Input[At++]);
+            }
+            else
+            {
+                // Erase previous text
+                tb_printf(AtX++, AtY, 0, 0, " ");
+            }
+
+            if (AtX == Text.X + Text.W) { AtY++; AtX = Text.X; }
+        }
+
+        // Position in input based on cursor position
+        InputPos = TextOffset + (global.cursor_x - Text.X) + (global.cursor_y - Text.Y) * Text.W; 
+
+#ifdef DEBUG
+        tb_printf(TextBox.X, TextBox.Y, 0, 0,
+                  "%2d,%-2d +%d #%-2d %d/%d",
+                  global.cursor_x, global.cursor_y,
+                  TextOffset, InputPos,
+                  InputLen, MAX_INPUT_LEN);
+#endif
+
         tb_present();
 
         tb_poll_event(&ev);
@@ -145,98 +175,135 @@ main(void)
         {
             switch (ev.key)
             {
+            // Delete character forwards
             case TB_KEY_CTRL_D:
             {
                 if (InputPos == InputLen) break;
                 Delete(Input, InputPos);
-                Input[MAX_INPUT_LEN - 1] = 0;
                 InputLen--;
+                // Delete(Input, Position)
             } break;
+            // Delete Word backwards
             case TB_KEY_CTRL_W:
             {
-                // TODO: this could be one memmove call
-                while (InputPos && is_whitespace(Input[InputPos - 1]))
+                u32 At = InputPos;
+                // Find character to stop on
+                while (At && is_whitespace(Input[At - 1])) At--;
+                while (At && !is_whitespace(Input[At - 1])) At--;
+
+                u32 NDelete = InputPos - At;
+                memmove(Input + At, Input + InputPos, (InputLen - InputPos) * sizeof(Input[At]));
+                InputLen -= NDelete;
+
+                if (NDelete > global.cursor_x)
                 {
-                    InputPos--;
-                    InputLen--;
-                    Delete(Input, InputPos);
-                    Input[MAX_INPUT_LEN - 1] = 0;
+
                 }
-                while (InputPos && !is_whitespace(Input[InputPos - 1]))
-                {
-                    InputPos--;
-                    InputLen--;
-                    Delete(Input, InputPos);
-                    Input[MAX_INPUT_LEN - 1] = 0;
+                global.cursor_x -= NDelete;
+                if (global.cursor_x < Text.X) {
+                    global.cursor_y--;
+                    global.cursor_x += Text.W;
+                    if (global.cursor_y < Text.Y)
+                    {
+                        global.cursor_y = Text.Y + Text.H - 1;
+                        TextOffset -= TextSurface;
+                    }
                 }
+                assert(IsInRect(Text, global.cursor_x, global.cursor_y));
 
             } break;
+            // Delete until start of line
             case TB_KEY_CTRL_U:
             {
-                if (!InputPos) break;
-                memmove(Input,
-                        Input + InputPos,
-                        (InputLen - InputPos) * sizeof(wchar_t));
-                InputLen -= InputPos;
-                InputPos = 0;
+                // memmove until first character
             } break;
             // Delete until end of input
-            case TB_KEY_CTRL_K: InputLen = InputPos; break;
+            case TB_KEY_CTRL_K: break;
             // Move to start
-            case TB_KEY_CTRL_A: InputPos = 0; break;
+            case TB_KEY_CTRL_A: break;
             // Move to end
-            case TB_KEY_CTRL_E: InputPos = InputLen; break;
+            case TB_KEY_CTRL_E: break;
             // Move backwards by one character
-            case TB_KEY_CTRL_B: if (InputPos) InputPos--; break;
+            case TB_KEY_CTRL_B: break;
             // Move forwards by one character
-            case TB_KEY_CTRL_F: if (InputPos < InputLen) InputPos++; break;
+            case TB_KEY_CTRL_F: break;
             // Move backwards by word
-            case TB_KEY_ARROW_LEFT:
-            {
-                while (InputPos && is_whitespace(Input[--InputPos]));
-                while (InputPos && !is_whitespace(Input[--InputPos]));
-            } break;
+            case TB_KEY_ARROW_LEFT: { } break;
             // Move forwards by word
-            case TB_KEY_ARROW_RIGHT:
-            {
-                while (InputPos < InputLen && is_whitespace(Input[InputPos])) InputPos++;
-                while (InputPos < InputLen && !is_whitespace(Input[++InputPos]));
-            } break;
+            case TB_KEY_ARROW_RIGHT: { } break;
             }
 
         }
+
         // Insert new character in Input at InputPos
         else if (ev.ch && InputLen < MAX_INPUT_LEN)
         {
-            memmove(Input + InputPos + 1,
-                    Input + InputPos,
-                    (MAX_INPUT_LEN - InputPos - 1) * sizeof(*Input));
-            Input[InputPos++] = ev.ch;
-            InputLen++;
         }
         else
         {
             switch (ev.key)
             {
+                // Delete character backwards
                 case TB_KEY_BACKSPACE2:
                 {
-                    if (!InputLen) break;
-                    Input[InputPos--] = 0;
-                    InputLen--;
                 } break;
+                case TB_KEY_ARROW_UP:
+                {
+                    if (global.cursor_y == Text.Y)
+                    {
+                        if (TextOffset == 0)
+                        {
+                            global.cursor_x = Text.X;
+
+                            break;
+                        }
+
+                        TextOffset -= TextSurface;
+                        global.cursor_y = Text.Y + Text.H - 1;
+                    }
+                    else
+                    {
+                        global.cursor_y--;
+                    }
+                } break;
+                case TB_KEY_ARROW_DOWN:
+                {
+                    if (InputPos + Text.W > InputLen) 
+                    {
+                        // Put the cursor on the last character
+                        global.cursor_x = Text.X + (InputLen - TextOffset) % (Text.W);
+                        global.cursor_y = Text.Y + (InputLen - TextOffset) / Text.W;
+
+                        break;
+                    }
+
+                    if (global.cursor_y == Text.Y + Text.H - 1)
+                    {
+                        TextOffset += TextSurface;
+                        global.cursor_y = Text.Y;
+                    }
+                    else
+                    {
+                        global.cursor_y++;
+                    }
+                } break;
+
+                // Move character left or scroll
                 case TB_KEY_ARROW_LEFT:
                 {
-                    if (InputPos) InputPos--;
+                    if (InputPos == 0) break;
 
-                    // Text is assumed to start on (Text.X, Text.Y)
+                    // If text is on the first character of the box scroll backwards
                     if (global.cursor_x == Text.X &&
                         global.cursor_y == Text.Y)
                     {
-                        if (InputPos == 0) break;
 
                         global.cursor_x = Text.X + Text.W - 1;
                         global.cursor_y = Text.Y + Text.H - 1;
-                        // TODO: scroll
+
+                        // Scroll
+                        TextOffset -= TextSurface;
+
                         break;
                     }
 
@@ -248,22 +315,23 @@ main(void)
                     }
 
                 } break;
+                // Move character right or scroll
                 case TB_KEY_ARROW_RIGHT:
                 {
                     if (InputPos == InputLen) break;
 
-                    InputPos++;
-
+                    // If cursor is on the last character scroll forwards
                     if (global.cursor_x == Text.X + Text.W - 1 &&
                         global.cursor_y == Text.Y + Text.H - 1)
                     {
-
                         global.cursor_x = Text.X;
                         global.cursor_y = Text.Y;
 
+                        // Scroll
+                        TextOffset += TextSurface;
+
                         break;
                     }
-                    // TODO: scroll
 
                     global.cursor_x++;
                     if (global.cursor_x == Text.X + Text.W)
@@ -274,15 +342,6 @@ main(void)
                 } break;
             }
         }
-
-#ifdef DEBUG
-            tb_printf(TextBox.X, TextBox.Y, 0, 0,
-                      "%2d,%-2d #%-2d %d/%d",
-                      global.cursor_x, global.cursor_y,
-                      InputPos,
-                      InputLen, MAX_INPUT_LEN);
-#endif
-
 
     }
 

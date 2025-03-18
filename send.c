@@ -7,7 +7,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#define CHATTY_IMPL
 #include "chatty.h"
+#undef CHATTY_IMPL
 #include "protocol.h"
 
 int

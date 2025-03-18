@@ -1,4 +1,7 @@
+#define CHATTY_IMPL
 #include "chatty.h"
+#undef CHATTY_IMPL
+
 #include "protocol.h"
 
 #include <assert.h>
