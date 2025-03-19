@@ -1,5 +1,5 @@
 #define TB_IMPL
-#include "../chatty/external/termbox2.h"
+#include <termbox2.h>
 
 #include <locale.h>
 #include <signal.h>

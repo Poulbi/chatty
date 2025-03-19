@@ -3514,4 +3514,5 @@ static int bytebuf_free(struct bytebuf_t *b) {
     return TB_OK;
 }
 
+#undef TB_IMPL
 #endif // TB_IMPL

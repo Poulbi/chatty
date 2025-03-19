@@ -43,7 +43,7 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-#include "chatty.h"
+#include "../source/chatty.h"
 
 /* Macro's */
 #define Expect(expr) if (!(expr)) \

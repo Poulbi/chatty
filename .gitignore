@@ -1,8 +1,2 @@
-build/*
-external/keyboard
-
-_id
-_clients
-*.log
-
-tags
+.gitignore
+chatty.log

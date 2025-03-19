@@ -1,6 +1,7 @@
 #define TB_IMPL
-#include "external/termbox2.h"
+#include "termbox2.h"
 #undef TB_IMPL
+
 
 #include <arpa/inet.h>
 #include <locale.h>
@@ -34,15 +35,18 @@
 #endif // DEBUG
 #endif // Assert
 
-#define CHATTY_IMPL
-#include "chatty.h"
-#include "protocol.h"
-
-#define TEXTBOX_MAX_INPUT MAX_INPUT_LEN
-#include "ui.h"
 
 #define ARENA_IMPL
 #include "arena.h"
+
+#define CHATTY_IMPL
+#include "chatty.h"
+
+#include "protocol.h"
+
+#define TEXTBOX_MAX_INPUT MAX_INPUT_LEN
+#define UI_IMPL
+#include "ui.h"
 
 enum { FDS_BI = 0, // for one-way communication with the server (eg. TextMessage)
        FDS_UNI,      // For two-way communication with the server (eg. IDMessage)
@@ -334,8 +338,7 @@ DisplayChat(Arena* ScratchArena,
     global.cursor_x = TextR.X;
     global.cursor_y = TextR.Y;
     DrawBox(TextBox, 0);
-
-    // InputBox(TextBox, Input, InputLen, True);
+    DrawTextBox(TextR, Input, InputLen);
 
     // Print vertical bar
     s32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
