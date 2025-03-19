@@ -34,53 +34,18 @@
 #define global_variable
 #define internal static
 
-typedef uint8_t u8;
-typedef uint16_t u16;
-typedef uint32_t u32;
-typedef uint64_t u64;
-typedef int8_t s8;
-typedef int16_t s16;
-typedef int32_t s32;
-typedef int64_t s64;
-typedef enum {
-    False = 0,
-    True = 1
-} Bool;
+#include "types.h"
 
-// Arena Allocator
-typedef struct {
-    void* addr;
-    u64 size;
-    u64 pos;
-} Arena;
-#define PushArray(arena, type, count) (type*)ArenaPush((arena), sizeof(type) * (count))
-#define PushArrayZero(arena, type, count) (type*)ArenaPushZero((arena), sizeof(type) * (count))
-#define PushStruct(arena, type) PushArray((arena), (type), 1)
-#define PushStructZero(arena, type) PushArrayZero((arena), (type), 1)
-
-u32 wstrlen(u32* str);
-void loggingf(char* format, ...);
-void ArenaAlloc(Arena* arena, u64 size);
-void ArenaRelease(Arena* arena);
-void* ArenaPush(Arena* arena, u64 size);
+void Loggingf(char* format, ...);
 
 #endif // CHATTY_H
 
 #ifdef CHATTY_IMPL
 
-global_variable s32 logfd;
-
-u32
-wstrlen(u32* str)
-{
-    u32 i = 0;
-    while (str[i] != 0)
-        i++;
-    return i;
-}
+global_variable s32 LogFD;
 
 void
-loggingf(char* format, ...)
+LoggingF(char* format, ...)
 {
     char buf[LOGMESSAGE_MAX];
     va_list args;
@@ -96,36 +61,10 @@ loggingf(char* format, ...)
     u8 timestamp[LOG_LEN];
     struct tm* ltime = localtime((time_t*)&t);
     strftime((char*)timestamp, LOG_LEN, LOG_FMT, ltime);
-    write(logfd, timestamp, LOG_LEN - 1);
+    write(LogFD, timestamp, LOG_LEN - 1);
 
-    write(logfd, buf, n);
+    write(LogFD, buf, n);
 }
 
-
-// Returns arena in case of success, or 0 if it failed to alllocate the memory
-void
-ArenaAlloc(Arena* arena, u64 size)
-{
-    arena->addr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    assert(arena->addr != MAP_FAILED);
-    arena->pos = 0;
-    arena->size = size;
-}
-
-void
-ArenaRelease(Arena* arena)
-{
-    munmap(arena->addr, arena->size);
-}
-
-void*
-ArenaPush(Arena* arena, u64 size)
-{
-    u8* mem;
-    mem = (u8*)arena->addr + arena->pos;
-    arena->pos += size;
-    assert(arena->pos <= arena->size);
-    return mem;
-}
 
 #endif // CHATTY_IMPL

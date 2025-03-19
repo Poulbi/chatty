@@ -1,0 +1,12 @@
+define tbx
+  tui ena
+  b 126
+  continue
+  disp SearchIndex
+  disp PrevIndex
+  disp Text[TextOffset + SearchIndex]
+  disp Text + TextOffset + PrevIndex
+  disp BreakOffset
+  disp YOffset
+end
+

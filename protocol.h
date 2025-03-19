@@ -1,7 +1,8 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 
-#include "chatty.h"
+#include "arena.h"
+#include "types.h"
 
 /// Protocol
 // - every message has format Header + Message
@@ -212,7 +213,7 @@ recvTextMessage(Arena* msgsArena, u32 fd)
 
     nrecv = recv(fd, (u8*)&message->text, text_size, 0);
     assert(nrecv != -1);
-    assert(nrecv == message->len * sizeof(*message->text));
+    assert(nrecv == (s32)(message->len * sizeof(*message->text)));
 
     return message;
 }
@@ -331,7 +332,7 @@ sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
     s32 nsend_total;
     s32 nsend = send(fd, &header, sizeof(header), 0);
     if (nsend == -1) return nsend;
-    loggingf("sendAnyMessage (%d)|sending "HEADER_FMT"\n", fd, HEADER_ARG(header));
+    LoggingF("sendAnyMessage (%d)|sending "HEADER_FMT"\n", fd, HEADER_ARG(header));
     assert(nsend == sizeof(header));
     nsend_total = nsend;
 
@@ -359,7 +360,7 @@ sendAnyMessage(u32 fd, HeaderMessage header, void* anyMessage)
         anyMessage = &message->text;
     } break;
     default:
-        loggingf("sendAnyMessage (%d)|Cannot send %s\n", fd, headerTypeString(header.type));
+        LoggingF("sendAnyMessage (%d)|Cannot send %s\n", fd, headerTypeString(header.type));
         return -1;
     }
 

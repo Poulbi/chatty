@@ -9,12 +9,13 @@ The idea is the following:
 - authentication
 
 ## client
-- [ ] bug: when connecting two clients of the same account
-- [ ] bug: wrapping does not work and displays nothing if there is no screen space
-- [ ] bug: reconnect does not work when server does not know id
-- [ ] convert tabs to spaces
-- [ ] bug: when using lots of markup characters
-- [ ] newline support
+- [ ] BUG: text is not appearing after typing
+- [ ] BUG: when connecting two clients of the same account
+- [ ] BUG: wrapping does not work and displays nothing if there is no screen space
+- [ ] BUG: reconnect does not work when server does not know id
+- [ ] TODO: Convert tabs to spaces
+- [ ] BUG: when using lots of markup characters
+- [ ] TODO: Newline support
     - [ ] resizable box
 
 ## server

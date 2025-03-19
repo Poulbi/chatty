@@ -33,7 +33,7 @@ wrap(u8* Text, u32 Len, u32 XLimit, u32 YLimit)
 
         // break
         t = Text[X];
-        *(Text + X) = '\0';
+        Text[X] = '\0';
         tb_printf(0, Y, 0, 0, "%s", Text + PrevX);
         Text[X] = t;
         Y++;

@@ -1,8 +1,8 @@
 #define TB_IMPL
 #include "external/termbox2.h"
+#undef TB_IMPL
 
 #include <arpa/inet.h>
-#include <assert.h>
 #include <locale.h>
 #include <poll.h>
 #include <pthread.h>
@@ -22,11 +22,27 @@
 // Number of spaces inserted when pressing Tab/Ctrl+I
 #define TAB_WIDTH 4
 
+#ifndef Assert
+#ifdef DEBUG
+#define Assert(expr) if (!(expr)) \
+    { \
+        tb_shutdown(); \
+        raise(SIGTRAP); \
+    }
+#else
+#define Assert(expr) ;
+#endif // DEBUG
+#endif // Assert
+
 #define CHATTY_IMPL
 #include "chatty.h"
-#undef CHATTY_IMPL
 #include "protocol.h"
+
+#define TEXTBOX_MAX_INPUT MAX_INPUT_LEN
 #include "ui.h"
+
+#define ARENA_IMPL
+#include "arena.h"
 
 enum { FDS_BI = 0, // for one-way communication with the server (eg. TextMessage)
        FDS_UNI,      // For two-way communication with the server (eg. IDMessage)
@@ -64,7 +80,7 @@ void
 popup(u32 fg, u32 bg, u8* text)
 {
     u32 len = strlen((char*)text);
-    assert(len > 0);
+    Assert(len > 0);
     tb_print(global.width / 2 - len / 2, global.height / 2, fg, bg, (char*)text);
 }
 
@@ -96,7 +112,7 @@ add_user_info(Arena* clientsArena, s32 fd, u64 id)
     header.id = user.ID;
     IDMessage message = {id};
     s32 nsend = sendAnyMessage(fd, header, &message);
-    assert(nsend != -1);
+    Assert(nsend != -1);
 
     // Wait for response
     IntroductionMessage introduction_message;
@@ -107,7 +123,7 @@ add_user_info(Arena* clientsArena, s32 fd, u64 id)
     memcpy(client->Author, introduction_message.author, AUTHOR_LEN);
     client->ID = id;
 
-    loggingf("Got " USER_FMT "\n", USER_ARG((*client)));
+    LoggingF("Got " USER_FMT "\n", USER_ARG((*client)));
     return client;
 }
 
@@ -136,11 +152,11 @@ authenticate(User* user, s32 fd)
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
         IDMessage message = {user->ID};
         s32 nsend = sendAnyMessage(fd, header, &message);
-        assert(nsend != -1);
+        Assert(nsend != -1);
 
         ErrorMessage error_message;
         s32 nrecv = recvAnyMessageType(fd, &header, &error_message, HEADER_TYPE_ERROR);
-        assert(nrecv != -1);
+        Assert(nrecv != -1);
         // TODO: handle not found
         if (nrecv == 0)
             return 0;
@@ -157,11 +173,11 @@ authenticate(User* user, s32 fd)
         IntroductionMessage message;
         memcpy(message.author, user->Author, AUTHOR_LEN);
         s32 nsend = sendAnyMessage(fd, header, &message);
-        assert(nsend != -1);
+        Assert(nsend != -1);
 
         IDMessage id_message;
         s32 nrecv = recvAnyMessageType(fd, &header, &id_message, HEADER_TYPE_ID);
-        assert(nrecv != -1);
+        Assert(nrecv != -1);
         user->ID = id_message.id;
         return 1;
     }
@@ -180,7 +196,7 @@ thread_reconnect(void* fds_ptr)
     s32 unifd, bifd;
     struct pollfd* fds = fds_ptr;
     struct timespec t = { 0, Miliseconds(300) }; // 300 miliseconds
-    loggingf("Trying to reconnect\n");
+    LoggingF("Trying to reconnect\n");
     while (1)
     {
         // timeout
@@ -189,18 +205,18 @@ thread_reconnect(void* fds_ptr)
         bifd = get_connection(&address);
         if (bifd == -1)
         {
-            loggingf("errno: %d\n", errno);
+            LoggingF("errno: %d\n", errno);
             continue;
         }
         unifd = get_connection(&address);
         if (unifd == -1)
         {
-            loggingf("errno: %d\n", errno);
+            LoggingF("errno: %d\n", errno);
             close(bifd);
             continue;
         }
 
-        loggingf("Reconnect succeeded (%d, %d), authenticating\n", unifd, bifd);
+        LoggingF("Reconnect succeeded (%d, %d), authenticating\n", unifd, bifd);
 
         if (authenticate(&user, bifd) &&
             authenticate(&user, unifd))
@@ -211,7 +227,7 @@ thread_reconnect(void* fds_ptr)
         close(bifd);
         close(unifd);
 
-        loggingf("Failed, retrying...\n");
+        LoggingF("Failed, retrying...\n");
     }
 
     fds[FDS_BI].fd = bifd;
@@ -230,10 +246,10 @@ run_command_get_output(char *Command, char *Argv[], u8 *OutputBuffer, int Len)
 
     int CommandPipe[2];
     int Error = pipe(CommandPipe);
-    assert(Error != -1);
+    Assert(Error != -1);
 
     int Pid = fork();
-    assert(Pid != -1);
+    Assert(Pid != -1);
 
     // Run command in child
     if (!Pid)
@@ -269,7 +285,7 @@ run_command_get_output(char *Command, char *Argv[], u8 *OutputBuffer, int Len)
     close(CommandPipe[1]);
 
     Result.NumRead = read(CommandPipe[0], OutputBuffer, Len);
-    assert(Result.NumRead != -1);
+    Assert(Result.NumRead != -1);
 
     return Result;
 }
@@ -283,33 +299,43 @@ DisplayChat(Arena* ScratchArena,
             Arena* ClientsArena, struct pollfd* fds,
             wchar_t Input[], u32 InputLen)
 {
+    rect TextBox = {
+        1, 0, global.width - 2, 3,
+    };
+    u32 FreeHeight = global.height - TextBox.H;
+    TextBox.Y = FreeHeight;
+
 #define MIN_TEXT_WIDTH_FOR_WRAPPING 20
-    u32 BoxHeight = GetInputBoxMinimumHeight();
-    u32 MinBoxWidth = GetInputBoxMinimumWidth();
-
-    u32 BoxWidth = global.width - 1;
-    u32 InputBoxTextWidth = BoxWidth - MinBoxWidth + 2;
-
-    if (InputLen >= InputBoxTextWidth &&
-        InputBoxTextWidth > MIN_TEXT_WIDTH_FOR_WRAPPING)
+    s32 MinBoxWidth = TEXTBOX_MIN_WIDTH;
+    s32 InputBoxTextWidth = TextBox.W - MinBoxWidth + 2;
+    bool ShouldIncreaseSize = (
+        (s32)InputLen >= InputBoxTextWidth &&
+        InputBoxTextWidth > MIN_TEXT_WIDTH_FOR_WRAPPING
+    );
+    if (ShouldIncreaseSize)
     {
-        BoxHeight++;
+        TextBox.H++;
     }
-
-    u32 FreeHeight = global.height - BoxHeight;
-
 #undef MIN_TEXT_WIDTH_FOR_WRAPPING
 
-    if (global.height < BoxHeight || global.width < MinBoxWidth)
+    rect TextR = {
+        TextBox.X + 2, TextBox.Y + 1,
+        TextBox.W - 2*TEXTBOX_PADDING_X - 2*TEXTBOX_BORDER_WIDTH,
+        TextBox.H - 2*TEXTBOX_BORDER_WIDTH
+    };
+
+    if (global.height < TextBox.H || global.width < TextBox.W)
     {
         tb_hide_cursor();
         return;
     }
-    bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
 
-    InputBox(0, FreeHeight, BoxWidth, BoxHeight,
-             Input, InputLen,
-             True);
+    bytebuf_puts(&global.out, global.caps[TB_CAP_SHOW_CURSOR]);
+    global.cursor_x = TextR.X;
+    global.cursor_y = TextR.Y;
+    DrawBox(TextBox, 0);
+
+    // InputBox(TextBox, Input, InputLen, True);
 
     // Print vertical bar
     s32 VerticalBarOffset = TIMESTAMP_LEN + AUTHOR_LEN + 2;
@@ -335,7 +361,7 @@ DisplayChat(Arena* ScratchArena,
 
         // Used to go to the next message in MessagesArena by incrementing with the messages' size.
         u8* MessageAddress = MessagesArena->addr;
-        assert(MessageAddress != 0);
+        Assert(MessageAddress != 0);
 
         // Skip messages if there is not enough space to display them all
         u32 MessagesOffset = (MessagesNum > FreeHeight) ? MessagesNum - FreeHeight : 0;
@@ -361,7 +387,7 @@ DisplayChat(Arena* ScratchArena,
                 break;
             default:
                 // unhandled message type
-                assert(0);
+                Assert(0);
             }
         }
 
@@ -379,10 +405,10 @@ DisplayChat(Arena* ScratchArena,
             User* client = get_user_by_id(ClientsArena, header->id);
             if (!client)
             {
-                loggingf("User not known, requesting from server\n");
+                LoggingF("User not known, requesting from server\n");
                 client = add_user_info(ClientsArena, fds[FDS_BI].fd, header->id);
             }
-            assert(client);
+            Assert(client);
 
             switch (header->type)
             {
@@ -480,7 +506,7 @@ main(int argc, char** argv)
     }
 
     u32 arg_len = strlen(argv[1]);
-    assert(arg_len <= AUTHOR_LEN - 1);
+    Assert(arg_len <= AUTHOR_LEN - 1);
     memcpy(user.Author, argv[1], arg_len);
     user.Author[arg_len] = '\0';
 
@@ -506,8 +532,8 @@ main(int argc, char** argv)
     pthread_t thr_rec; // thread for reconnecting to server when disconnected
 
 #ifdef LOGGING
-    logfd = open(LOGFILE, O_RDWR | O_CREAT | O_TRUNC, 0600);
-    assert(logfd != -1);
+    LogFD = open(LOGFILE, O_RDWR | O_CREAT | O_TRUNC, 0600);
+    Assert(LogFD != -1);
 #else
     logfd = 2; // stderr
 #endif
@@ -531,7 +557,7 @@ main(int argc, char** argv)
     // File for storing the user's ID.
     u32 idfile = open(ID_FILE, O_RDWR | O_CREAT, 0600);
     s32 nread = read(idfile, &user.id, sizeof(user.id));
-    assert(nread != -1);
+    Assert(nread != -1);
 #endif
     /* Authentication */
     {
@@ -539,25 +565,25 @@ main(int argc, char** argv)
         bifd = get_connection(&address);
         if (bifd == -1)
         {
-            loggingf("errno: %d\n", errno);
+            LoggingF("errno: %d\n", errno);
             return 1;
         }
         unifd = get_connection(&address);
         if (unifd == -1)
         {
-            loggingf("errno: %d\n", errno);
+            LoggingF("errno: %d\n", errno);
             return 1;
         }
-        loggingf("(%d,%d)\n", bifd, unifd);
+        LoggingF("(%d,%d)\n", bifd, unifd);
         if (!authenticate(&user, bifd) ||
             !authenticate(&user, unifd))
         {
-            loggingf("errno: %d\n", errno);
+            LoggingF("errno: %d\n", errno);
             return 1;
         }
         else
         {
-            loggingf("Authenticated (%d,%d)\n", bifd, unifd);
+            LoggingF("Authenticated (%d,%d)\n", bifd, unifd);
         }
         fds[FDS_BI].fd = bifd;
         fds[FDS_UNI].fd = unifd;
@@ -568,10 +594,10 @@ main(int argc, char** argv)
     write(idfile, &user.id, sizeof(user.id));
 #endif
 
-    loggingf("Got ID: %lu\n", user.ID);
+    LoggingF("Got ID: %lu\n", user.ID);
 
     // for wide character printing
-    assert(setlocale(LC_ALL, ""));
+    Assert(setlocale(LC_ALL, ""));
 
     // init
     tb_init();
@@ -588,7 +614,7 @@ main(int argc, char** argv)
     {
         err = poll(fds, FDS_MAX, TIMEOUT_POLL);
         // ignore resize events and use them to redraw the screen
-        assert(err != -1 || errno == EINTR);
+        Assert(err != -1 || errno == EINTR);
 
         tb_clear();
 
@@ -597,24 +623,24 @@ main(int argc, char** argv)
             // got data from server
             HeaderMessage header;
             nrecv = recv(fds[FDS_UNI].fd, &header, sizeof(header), 0);
-            assert(nrecv != -1);
+            Assert(nrecv != -1);
 
             // Server disconnects
             if (nrecv == 0)
             {
                 // close diconnected server's socket
                 err = close(fds[FDS_UNI].fd);
-                assert(err == 0);
+                Assert(err == 0);
                 fds[FDS_UNI].fd = -1; // ignore
                 // start trying to reconnect in a thread
                 err = pthread_create(&thr_rec, 0, &thread_reconnect, (void*)fds);
-                assert(err == 0);
+                Assert(err == 0);
             }
             else
             {
                 if (header.version != PROTOCOL_VERSION)
                 {
-                    loggingf("Header received does not match version\n");
+                    LoggingF("Header received does not match version\n");
                     continue;
                 }
 
@@ -631,12 +657,12 @@ main(int argc, char** argv)
                 case HEADER_TYPE_PRESENCE:;
                     PresenceMessage* message = ArenaPush(&MessagesArena, sizeof(*message));
                     nrecv = recv(fds[FDS_UNI].fd, message, sizeof(*message), 0);
-                    assert(nrecv != -1);
-                    assert(nrecv == sizeof(*message));
+                    Assert(nrecv != -1);
+                    Assert(nrecv == sizeof(*message));
                     MessagesNum++;
                     break;
                 default:
-                    loggingf("Got unhandled message: %s\n", headerTypeString(header.type));
+                    LoggingF("Got unhandled message: %s\n", headerTypeString(header.type));
                     break;
                 }
             }
