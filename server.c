@@ -1,10 +1,3 @@
-#define CHATTY_IMPL
-#include "chatty.h"
-#undef CHATTY_IMPL
-
-#include "protocol.h"
-
-#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -16,6 +9,30 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Assertion macro */
+#ifndef Assert
+#ifdef DEBUG
+#define Assert(expr) if (!(expr)) { \
+    raise(SIGTRAP); \
+}
+#else
+#define Assert(expr) if (!(expr)) { \
+    raise(SIGTRAP); \
+}
+#endif // DEBUG
+#endif // Assert
+
+/* Dependencies */
+#define CHATTY_IMPL
+#include "chatty.h"
+#undef CHATTY_IMPL
+
+#define ARENA_IMPL
+#include "arena.h"
+#undef ARENA_IMPL
+#include "protocol.h"
+
+/* Configuration options */
 // timeout on polling
 #define TIMEOUT 60 * 1000
 // max pending connections
@@ -102,7 +119,7 @@ printTextMessage(TextMessage* message, Client* client, u8 wide)
     } else {
         u8 str[message->len];
         wcstombs((char*)str, (wchar_t*)&message->text, message->len * sizeof(*message->text));
-        loggingf("TextMessage: %s [%s] (%d)%s\n", timestamp, client->author, message->len, str);
+        LoggingF("TextMessage: %s [%s] (%d)%s\n", timestamp, client->author, message->len, str);
     }
 }
 
@@ -135,7 +152,7 @@ sendToOthers(Client* clients, u32 nclients, Client* client, ClientFD type, Heade
         nsend = sendAnyMessage(fd, *header, anyMessage);
 
         assert(nsend != -1);
-        loggingf("sendToOthers "CLIENT_FMT"|%d<-%s %d bytes\n", CLIENT_ARG((clients[i])), fd, headerTypeString(header->type), nsend);
+        LoggingF("sendToOthers "CLIENT_FMT"|%d<-%s %d bytes\n", CLIENT_ARG((clients[i])), fd, headerTypeString(header->type), nsend);
     }
 }
 
@@ -165,7 +182,7 @@ sendToAll(Client* clients, u32 nclients, ClientFD type, HeaderMessage* header, v
         else
             assert(0);
         assert(nsend != -1);
-        loggingf("sendToAll|[%s]->"CLIENT_FMT" %d bytes\n", headerTypeString(header->type),
+        LoggingF("sendToAll|[%s]->"CLIENT_FMT" %d bytes\n", headerTypeString(header->type),
                                                             CLIENT_ARG(clients[i]),
                                                             nsend);
     }
@@ -175,7 +192,7 @@ sendToAll(Client* clients, u32 nclients, ClientFD type, HeaderMessage* header, v
 void
 disconnect(Client* client)
 {
-    loggingf("Disconnecting "CLIENT_FMT"\n", CLIENT_ARG((*client)));
+    LoggingF("Disconnecting "CLIENT_FMT"\n", CLIENT_ARG((*client)));
     if (client->unifd && client->unifd->fd != -1)
     {
         close(client->unifd->fd);
@@ -215,7 +232,7 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
     s32 nrecv = 0;
     Client* client = 0;
 
-    loggingf("authenticate (%d)|" HEADER_FMT "\n", pollfd->fd, HEADER_ARG(header));
+    LoggingF("authenticate (%d)|" HEADER_FMT "\n", pollfd->fd, HEADER_ARG(header));
 
     /* Scenario 1: Search for existing client */
     if (header.type == HEADER_TYPE_ID)
@@ -227,7 +244,7 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
         client = getClientByID((Client*)clientsArena->addr, nclients, message.id);
         if (!client)
         {
-            loggingf("authenticate (%d)|notfound\n", pollfd->fd);
+            LoggingF("authenticate (%d)|notfound\n", pollfd->fd);
             header.type = HEADER_TYPE_ERROR;
             ErrorMessage error_message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
             sendAnyMessage(pollfd->fd, header, &error_message);
@@ -235,7 +252,7 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
         }
         else
         {
-            loggingf("authenticate (%d)|found [%s](%lu)\n", pollfd->fd, client->author, client->id);
+            LoggingF("authenticate (%d)|found [%s](%lu)\n", pollfd->fd, client->author, client->id);
             header.type = HEADER_TYPE_ERROR;
             ErrorMessage error_message = ERROR_INIT(ERROR_TYPE_SUCCESS);
             sendAnyMessage(pollfd->fd, header, &error_message);
@@ -258,7 +275,7 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
         nrecv = recv(pollfd->fd, &message, sizeof(message), 0);
         if (nrecv != sizeof(message))
         {
-            loggingf("authenticate (%d)|err: %d/%lu bytes\n", pollfd->fd, nrecv, sizeof(message));
+            LoggingF("authenticate (%d)|err: %d/%lu bytes\n", pollfd->fd, nrecv, sizeof(message));
             return 0;
         }
 
@@ -279,7 +296,7 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
 #ifdef IMPORT_ID
         write(clients_file, client, sizeof(*client));
 #endif
-        loggingf("authenticate (%d)|Added [%s](%lu)\n", pollfd->fd, client->author, client->id);
+        LoggingF("authenticate (%d)|Added [%s](%lu)\n", pollfd->fd, client->author, client->id);
 
         // Send ID to new client
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
@@ -292,7 +309,7 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
         return client;
     }
 
-    loggingf("authenticate (%d)|Wrong header expected %s or %s\n", pollfd->fd,
+    LoggingF("authenticate (%d)|Wrong header expected %s or %s\n", pollfd->fd,
                                                                   headerTypeString(HEADER_TYPE_INTRODUCTION),
                                                                   headerTypeString(HEADER_TYPE_ID));
     return 0;
@@ -303,15 +320,15 @@ main(int argc, char** argv)
 {
     signal(SIGPIPE, SIG_IGN);
 
-    logfd = 2;
+    LogFD = 2;
     // optional logging
     if (argc > 1)
     {
         if (*argv[1] == '-')
             if (argv[1][1] == 'l')
             {
-                logfd = open(LOGFILE, O_RDWR | O_CREAT | O_TRUNC, 0600);
-                assert(logfd != -1);
+                LogFD = open(LOGFILE, O_RDWR | O_CREAT | O_TRUNC, 0600);
+                assert(LogFD != -1);
             }
     }
 
@@ -338,7 +355,7 @@ main(int argc, char** argv)
 
         err = listen(serverfd, MAX_CONNECTIONS);
         assert(!err);
-        loggingf("Listening on :%d\n", PORT);
+        LoggingF("Listening on :%d\n", PORT);
     }
 
     Arena clientsArena;
@@ -374,7 +391,7 @@ main(int argc, char** argv)
     if (statbuf.st_size > 0)
     {
         ArenaPush(&clientsArena, statbuf.st_size);
-        loggingf("Imported %lu client(s)\n", statbuf.st_size / sizeof(*clients));
+        LoggingF("Imported %lu client(s)\n", statbuf.st_size / sizeof(*clients));
         nclients += statbuf.st_size / sizeof(*clients);
 
         // Reset pointers on imported clients
@@ -385,7 +402,7 @@ main(int argc, char** argv)
         }
     }
     for (u32 i = 0; i < nclients - 1; i++)
-        loggingf("Imported: " CLIENT_FMT "\n", CLIENT_ARG(clients[i]));
+        LoggingF("Imported: " CLIENT_FMT "\n", CLIENT_ARG(clients[i]));
 #else
     clients_file = 0;
 #endif
@@ -412,11 +429,11 @@ main(int argc, char** argv)
 
             if (clientfd == -1)
             {
-                loggingf("Error while accepting connection (%d)\n", clientfd);
+                LoggingF("Error while accepting connection (%d)\n", clientfd);
                 continue;
             }
             else
-                loggingf("New connection(%d)\n", clientfd);
+                LoggingF("New connection(%d)\n", clientfd);
 
             // TODO: find empty space in arena (fragmentation)
             if (nclients + 1 == MAX_CONNECTIONS)
@@ -426,14 +443,14 @@ main(int argc, char** argv)
                 sendAnyMessage(clientfd, header, &message);
                 if (clientfd != -1)
                     close(clientfd);
-                loggingf("Max clients reached. Rejected connection\n");
+                LoggingF("Max clients reached. Rejected connection\n");
             }
             else
             {
                 // no more space, allocate
                 struct pollfd* pollfd = ArenaPush(&fdsArena, sizeof(*pollfd));
                 pollfd->fd = clientfd;
-                loggingf("Added pollfd(%d)\n", clientfd);
+                LoggingF("Added pollfd(%d)\n", clientfd);
             }
         }
 
@@ -441,14 +458,14 @@ main(int argc, char** argv)
         {
             if (!(fds[conn].revents & POLLIN)) continue;
             if (fds[conn].fd == -1) continue;
-            loggingf("Message(%d)\n", fds[conn].fd);
+            LoggingF("Message(%d)\n", fds[conn].fd);
 
             // We received a message, try to parse the header
             HeaderMessage header;
             s32 nrecv = recv(fds[conn].fd, &header, sizeof(header), 0);
             if(nrecv == -1)
             {
-                loggingf("Received error from fd: %d, errno: %d\n", fds[conn].fd, errno);
+                LoggingF("Received error from fd: %d, errno: %d\n", fds[conn].fd, errno);
             };
 
             Client* client;
@@ -457,36 +474,36 @@ main(int argc, char** argv)
                 client = getClientByFD(clients, nclients, fds[conn].fd);
                 if (client)
                 {
-                    loggingf("Received %d/%lu bytes "CLIENT_FMT"\n", nrecv, sizeof(header), CLIENT_ARG((*client)));
+                    LoggingF("Received %d/%lu bytes "CLIENT_FMT"\n", nrecv, sizeof(header), CLIENT_ARG((*client)));
                     disconnectAndNotify(clients, nclients, client);
                 }
                 else
                 {
-                    loggingf("Got error/disconnect from unauthenticated client\n");
+                    LoggingF("Got error/disconnect from unauthenticated client\n");
                     close(fds[conn].fd);
                     fds[conn].fd = -1;
                 }
                 continue;
             }
-            loggingf("Received(%d): " HEADER_FMT "\n", fds[conn].fd, HEADER_ARG(header));
+            LoggingF("Received(%d): " HEADER_FMT "\n", fds[conn].fd, HEADER_ARG(header));
 
             // Authentication
             if (!header.id)
             {
-                loggingf("No client for connection(%d)\n", fds[conn].fd);
+                LoggingF("No client for connection(%d)\n", fds[conn].fd);
 
                 client = authenticate(&clientsArena, clients_file, fds + conn, header);
 
                 if (!client)
                 {
-                    loggingf("Could not initialize client (%d)\n", fds[conn].fd);
+                    LoggingF("Could not initialize client (%d)\n", fds[conn].fd);
                     close(fds[conn].fd);
                     fds[conn].fd = -1;
                 }
                 /* This is the first time a message is sent, because unifd is not yet set. */
                 else if (!client->unifd)
                 {
-                    loggingf("Send connected message\n");
+                    LoggingF("Send connected message\n");
                     local_persist HeaderMessage header = HEADER_INIT(HEADER_TYPE_PRESENCE);
                     header.id = client->id;
                     PresenceMessage message = {.type = PRESENCE_TYPE_CONNECTED};
@@ -498,7 +515,7 @@ main(int argc, char** argv)
             client = getClientByID(clients, nclients, header.id);
             if (!client)
             {
-                loggingf("No client for id %d\n", fds[conn].fd);
+                LoggingF("No client for id %d\n", fds[conn].fd);
 
                 header.type = HEADER_TYPE_ERROR;
                 ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
@@ -516,7 +533,7 @@ main(int argc, char** argv)
             case HEADER_TYPE_TEXT:
             {
                 TextMessage* text_message = recvTextMessage(&msgsArena, fds[conn].fd);
-                loggingf("Received(%d): ", fds[conn].fd);
+                LoggingF("Received(%d): ", fds[conn].fd);
                 printTextMessage(text_message, client, 0);
 
                 sendToOthers(clients, nclients, client, UNIFD, &header, text_message);
@@ -547,7 +564,7 @@ main(int argc, char** argv)
                 assert(nrecv != -1);
             } break;
             default:
-                loggingf("Unhandled '%s' from "CLIENT_FMT"(%d)\n", headerTypeString(header.type),
+                LoggingF("Unhandled '%s' from "CLIENT_FMT"(%d)\n", headerTypeString(header.type),
                                                                    CLIENT_ARG((*client)),
                                                                    fds[conn].fd);
                 disconnectAndNotify(client, nclients, client);

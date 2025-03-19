@@ -1,6 +1,4 @@
-chatty
-send
-server
+build/*
 external/keyboard
 
 _id
