@@ -569,7 +569,7 @@ main(int argc, char** argv)
     loggingf("Got ID: %lu\n", user.ID);
 
     // for wide character printing
-    assert(setlocale(LC_ALL, "") != 0);
+    assert(setlocale(LC_ALL, ""));
 
     // init
     tb_init();
