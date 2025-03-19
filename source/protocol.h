@@ -2,7 +2,7 @@
 #define PROTOCOL_H
 
 #include "arena.h"
-#include "types.h"
+#include "chatty.h"
 
 /// Protocol
 // - every message has format Header + Message

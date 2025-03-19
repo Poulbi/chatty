@@ -7,6 +7,17 @@
 #include <stdbool.h>
 #include "termbox2.h"
 #include "arena.h"
+#include "chatty.h"
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef int64_t s64;
+typedef u32 b32;
 
 /* Types */
 
@@ -450,14 +461,21 @@ DrawTextBox(rect TextR, wchar_t *Text, u32 TextLen)
         if (At < TextLen) 
         {
             tb_printf(AtX++, AtY, 0, 0, "%lc", Text[At++]);
+            global.cursor_x = AtX;
         }
         else
         {
             tb_printf(AtX++, AtY, 0, 0, " ");
         }
 
-        if (AtX == TextR.X + TextR.W) { AtY++; AtX = TextR.X; }
+        if (AtX == TextR.X + TextR.W)
+        {
+            AtY++;
+            AtX = TextR.X;
+            global.cursor_y = AtY - 1;
+        }
     }
+
 }
 
 // NOTE: To ensure that the text looks the same even when scrolling it you must provide the whole text,
@@ -530,6 +548,7 @@ DrawTextBoxWrapped(rect TextR, wchar_t *Text, u32 TextLen)
 
 #endif // UI_H
 
+#ifdef UI_IMPL
 // Check if coordinate (X,Y) is in rect boundaries
 bool
 IsInRect(rect Rect, s32 X, s32 Y)
@@ -817,3 +836,5 @@ preprocess_markdown(Arena* ScratchArena, wchar_t* Text, u32 Len)
 
     return Result;
 }
+
+#endif
