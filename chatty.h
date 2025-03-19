@@ -64,6 +64,8 @@ void ArenaAlloc(Arena* arena, u64 size);
 void ArenaRelease(Arena* arena);
 void* ArenaPush(Arena* arena, u64 size);
 
+#endif // CHATTY_H
+
 #ifdef CHATTY_IMPL
 
 global_variable s32 logfd;
@@ -127,5 +129,3 @@ ArenaPush(Arena* arena, u64 size)
 }
 
 #endif // CHATTY_IMPL
-
-#endif // CHATTY_H
