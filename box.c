@@ -14,7 +14,7 @@
 #include <locale.h>
 
 #ifdef DEBUG
-#define Assert(expr) if (!expr) \
+#define Assert(expr) if (!(expr)) \
     { \
         tb_shutdown(); \
         *(u8*)0 = 0; \
@@ -101,6 +101,38 @@ IsInRect(rect Rect, u32 X, u32 Y)
     return False;
 }
 
+void
+ScrollLeft(rect Text, u32 *TextOffset, u32 Left)
+{
+    u32 TextSurface = Text.H * Text.W;
+
+    if (global.cursor_x - Left >= Text.X)
+    {
+        global.cursor_x -= Left;
+    }
+    else
+    {
+        global.cursor_x += Text.W - 1;
+
+        if (global.cursor_y > Text.Y)
+        {
+            global.cursor_y--;
+        }
+        else
+        {
+            global.cursor_y = Text.Y + Text.H - 1;
+            if (*TextOffset < TextSurface)
+            {
+                *TextOffset = 0;
+            }
+            else
+            {
+                *TextOffset -= TextSurface;
+            }
+        }
+    }
+}
+
 int
 main(void)
 {
@@ -112,7 +144,7 @@ main(void)
     u32 InputLen = 0;
     wchar_t Input[MAX_INPUT_LEN] = {0};
 
-#if 0
+#if 1
     wchar_t *t = L"This is some text that no one would want to know, but you could.";
     u32 Len = wcslen(t);
     for (u32 At = 0; At < Len; At++) Input[At] = t[At];
@@ -193,7 +225,10 @@ main(void)
                 if (InputPos == 0) break;
                 Delete(Input, InputPos - 1);
                 InputLen--;
-                global.cursor_x--;
+                // TODO: scrolling
+
+                ScrollLeft(Text, &TextOffset, 1);
+
             } break;
             // Delete character forwards
             case TB_KEY_CTRL_D:
@@ -285,15 +320,14 @@ main(void)
             }
 
         }
-
         // Insert new character in Input at InputPos
         else if (ev.ch && InputLen < MAX_INPUT_LEN)
         {
             if (InputPos < InputLen)
             {
-                memmove(Input + InputPos + 1,
-                        Input + InputPos,
-                        (InputLen - InputPos - 1) * sizeof(*Input));
+                memmove(Input + InputPos,
+                        Input + InputPos - 1,
+                        (InputLen - InputPos + 1) * sizeof(*Input));
             }
             Input[InputPos] = ev.ch;
             InputLen++;
