@@ -1,4 +1,3 @@
-#define CHATTY_IMPL
 #include "chatty.h"
 
 // Format option at a position in raw text, used when iterating to know when to toggle a color

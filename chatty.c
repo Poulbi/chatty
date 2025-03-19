@@ -22,7 +22,9 @@
 // Number of spaces inserted when pressing Tab/Ctrl+I
 #define TAB_WIDTH 4
 
+#define CHATTY_IMPL
 #include "chatty.h"
+#undef CHATTY_IMPL
 #include "protocol.h"
 #include "ui.h"
 
