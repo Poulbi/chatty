@@ -6,8 +6,6 @@ The idea is the following:
 - client for reading the messages and sending them at the same time
 - rooms
 - encryption
-    - ChaCha20-Poly1305
-    - AES
 - authentication
 
 ## client
@@ -60,8 +58,37 @@ The idea is the following:
 - *unicode and wide characters*: [C for dummies](https://c-for-dummies.com/blog/?p=2578)
 - *sockets*: [Nir Lichtman - Making Minimalist Chat Server in C on Linux](https://www.youtube.com/watch?v=gGfTjKwLQxY)
 - syscall manpages `man`
+- UTF8 Comprssion: [Casey Muratori - Simple RLE Compressor](https://www.youtube.com/watch?v=kikLEdc3C1c&t=6312s)
 
+### To Read
+#### C Programming
 - https://www.youtube.com/watch?v=wvtFGa6XJDU
 - https://nullprogram.com/blog/2023/02/11/
 - https://nullprogram.com/blog/2023/02/13/
 - https://nullprogram.com/blog/2023/10/08/
+#### Encryption w/ Compression
+- https://en.wikipedia.org/wiki/BREACH
+- https://en.wikipedia.org/wiki/CRIME
+- https://crypto.stackexchange.com/questions/2283/crypto-compression-algorithms
+- openpgp https://www.rfc-editor.org/rfc/rfc4880
+- https://security.stackexchange.com/questions/19911/crime-how-to-beat-the-beast-successor
+- https://blog.qualys.com/product-tech/2012/09/14/crime-information-leakage-attack-against-ssltls
+- Algorithms:
+    *Symmetric*
+    - AESI
+    - Blowfish
+    - Twofish
+    - Rivest Cipher (RC4)
+    *Assymetric*
+    - Data Encryption Standard (DES)
+    - ECDSA
+    - RSA
+    - Diffie-Hellman
+    - PGP
+    _Hash_
+    - Deflate
+    - Huffman Coding
+    - LZ77
+    Other
+    - ChaCha20-Poly1305
+    - AES(-GCM)

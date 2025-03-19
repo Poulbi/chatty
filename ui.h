@@ -1,3 +1,6 @@
+#define CHATTY_IMPL
+#include "chatty.h"
+
 // Format option at a position in raw text, used when iterating to know when to toggle a color
 // option.
 typedef struct {
@@ -433,6 +436,7 @@ InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
     }
 
 #ifdef DEBUG
+#ifdef MAX_INPUT_LEN
     tb_printf(BoxX + 1, BoxY, 0, 0, "%d/%d [%dx%d] %dx%d %d (%d,%d)+(%d,%d)",
             TextLen, MAX_INPUT_LEN,
             BoxWidth, BoxHeight,
@@ -440,6 +444,16 @@ InputBox(u32 BoxX, u32 BoxY, u32 BoxWidth, u32 BoxHeight,
             TextOffset,
             TextX, TextY,
             XOffset, YOffset);
+#else
+    tb_printf(BoxX + 1, BoxY, 0, 0, "%d/%d [%dx%d] %dx%d %d (%d,%d)+(%d,%d)",
+            TextLen, TextLen,
+            BoxWidth, BoxHeight,
+            TextWidth, TextHeight,
+            TextOffset,
+            TextX, TextY,
+            XOffset, YOffset);
+
+#endif
 #endif
 
     // Set the cursor

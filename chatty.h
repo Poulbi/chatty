@@ -1,4 +1,5 @@
 #ifndef CHATTY_H
+#define CHATTY_H
 
 #include <assert.h>
 #include <locale.h>
@@ -15,6 +16,24 @@
 #include <unistd.h>
 #include <wchar.h>
 
+// port for chatty
+#define PORT 9983
+// max number of bytes that can be logged at once
+#define LOGMESSAGE_MAX 2048
+#define LOG_FMT "%H:%M:%S "
+#define LOG_LEN 10
+// Enable/Disable saving clients permanently to file
+// #define IMPORT_ID
+
+#define Kilobytes(Value) ((Value) * 1024)
+#define Megabytes(Value) (Kilobytes(Value) * 1024)
+#define Gigabytes(Value) (Megabytes((u64)Value) * 1024)
+#define Terabytes(Value) (Gigabytes((u64)Value) * 1024)
+#define PAGESIZE 4096
+#define local_persist static
+#define global_variable
+#define internal static
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -28,24 +47,24 @@ typedef enum {
     True = 1
 } Bool;
 
-// port for chatty
-#define PORT 9983
-// max number of bytes that can be logged at once
-#define LOGMESSAGE_MAX 2048
-#define LOG_FMT "%H:%M:%S "
-#define LOG_LEN 10
+// Arena Allocator
+typedef struct {
+    void* addr;
+    u64 size;
+    u64 pos;
+} Arena;
+#define PushArray(arena, type, count) (type*)ArenaPush((arena), sizeof(type) * (count))
+#define PushArrayZero(arena, type, count) (type*)ArenaPushZero((arena), sizeof(type) * (count))
+#define PushStruct(arena, type) PushArray((arena), (type), 1)
+#define PushStructZero(arena, type) PushArrayZero((arena), (type), 1)
 
-#define Kilobytes(Value) ((Value) * 1024)
-#define Megabytes(Value) (Kilobytes(Value) * 1024)
-#define Gigabytes(Value) (Megabytes((u64)Value) * 1024)
-#define Terabytes(Value) (Gigabytes((u64)Value) * 1024)
-#define PAGESIZE 4096
-#define local_persist static
-#define global_variable
-#define internal static
+u32 wstrlen(u32* str);
+void loggingf(char* format, ...);
+void ArenaAlloc(Arena* arena, u64 size);
+void ArenaRelease(Arena* arena);
+void* ArenaPush(Arena* arena, u64 size);
 
-// Enable/Disable saving clients permanently to file
-// #define IMPORT_ID
+#ifdef CHATTY_IMPL
 
 global_variable s32 logfd;
 
@@ -80,17 +99,6 @@ loggingf(char* format, ...)
     write(logfd, buf, n);
 }
 
-// Arena Allocator
-struct Arena {
-    void* addr;
-    u64 size;
-    u64 pos;
-} typedef Arena;
-
-#define PushArray(arena, type, count) (type*)ArenaPush((arena), sizeof(type) * (count))
-#define PushArrayZero(arena, type, count) (type*)ArenaPushZero((arena), sizeof(type) * (count))
-#define PushStruct(arena, type) PushArray((arena), (type), 1)
-#define PushStructZero(arena, type) PushArrayZero((arena), (type), 1)
 
 // Returns arena in case of success, or 0 if it failed to alllocate the memory
 void
@@ -118,5 +126,6 @@ ArenaPush(Arena* arena, u64 size)
     return mem;
 }
 
-#endif
-#define CHATTY_H
+#endif // CHATTY_IMPL
+
+#endif // CHATTY_H
