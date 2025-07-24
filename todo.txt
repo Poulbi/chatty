@@ -1,0 +1,3 @@
+- discord-chatty bridge
+  - Work with discord's websocket API and try to bridge it to chatty by creating a bot.
+
