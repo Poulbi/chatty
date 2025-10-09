@@ -1,5 +1,7 @@
 # chatty: The terminal chat application
 
+<img src="https://git.spacehb.net/chatty/plain/screenshot.png?h=main">
+
 ## Overview
 `chatty` is a terminal chat application.
 Included is also a server.
