@@ -1,2 +1,3 @@
-.gitignore
 chatty.log
+.chatty_clients
+.chatty_id
