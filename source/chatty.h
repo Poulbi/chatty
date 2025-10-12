@@ -58,19 +58,19 @@ LoggingF(char* format, ...)
     char buf[LOGMESSAGE_MAX];
     va_list args;
     va_start(args, format);
-
+    
     vsnprintf(buf, sizeof(buf), format, args);
     va_end(args);
-
+    
     int n = 0;
     while (*(buf + n) != 0) n++;
-
+    
     u64 t = time(0);
     u8 timestamp[LOG_LEN];
     struct tm* ltime = localtime((time_t*)&t);
     strftime((char*)timestamp, LOG_LEN, LOG_FMT, ltime);
     write(LogFD, timestamp, LOG_LEN - 1);
-
+    
     write(LogFD, buf, n);
 }
 

@@ -13,11 +13,11 @@
 #ifndef Assert
 #ifdef DEBUG
 #define Assert(expr) if (!(expr)) { \
-    raise(SIGTRAP); \
+raise(SIGTRAP); \
 }
 #else
 #define Assert(expr) if (!(expr)) { \
-    raise(SIGTRAP); \
+raise(SIGTRAP); \
 }
 #endif // DEBUG
 #endif // Assert
@@ -42,8 +42,9 @@
 #define FDS_SIZE (fdsArena.pos / sizeof(struct pollfd))
 #define CLIENTS_SIZE (clientsArena.pos / sizeof(Client))
 
+#define IMPORT_ID 1
 // Where to save clients
-#define CLIENTS_FILE "_clients"
+#define CLIENTS_FILE ".chatty_clients"
 // Where to write logs
 #define LOGFILE "server.log"
 // Log to LOGFILE instead of stderr
@@ -51,8 +52,8 @@
 
 // enum for indexing the fds array
 enum { FDS_STDIN = 0,
-       FDS_SERVER,
-       FDS_CLIENTS };
+    FDS_SERVER,
+    FDS_CLIENTS };
 
 // Client information
 typedef struct {
@@ -80,7 +81,7 @@ Client*
 getClientByID(Client* clients, u32 nclients, ID id)
 {
     if (!id) return 0;
-
+    
     for (u32 i = 0; i < nclients; i++)
 	{
         if (clients[i].id == id)
@@ -95,7 +96,7 @@ Client*
 getClientByFD(Client* clients, u32 nclients, s32 fd)
 {
     if (fd == -1) return 0;
-
+    
     for (u32 i = 0; i < nclients; i++)
     {
         if ((clients[i].unifd && clients[i].unifd->fd == fd) ||
@@ -111,7 +112,7 @@ printTextMessage(TextMessage* message, Client* client, u8 wide)
 {
     u8 timestamp[TIMESTAMP_LEN] = {0};
     formatTimestamp(timestamp, message->timestamp);
-
+    
     if (wide)
 	{
         setlocale(LC_ALL, "");
@@ -134,7 +135,7 @@ sendToOthers(Client* clients, u32 nclients, Client* client, ClientFD type, Heade
     for (u32 i = 0; i < nclients - 1; i ++)
 	{
         if (clients + i == client) continue;
-
+        
         if (type == UNIFD)
         {
             if (clients[i].unifd && clients[i].unifd->fd != -1)
@@ -150,7 +151,7 @@ sendToOthers(Client* clients, u32 nclients, Client* client, ClientFD type, Heade
                 continue;
         }
         nsend = sendAnyMessage(fd, *header, anyMessage);
-
+        
         assert(nsend != -1);
         LoggingF("sendToOthers "CLIENT_FMT"|%d<-%s %d bytes\n", CLIENT_ARG((clients[i])), fd, headerTypeString(header->type), nsend);
     }
@@ -183,8 +184,8 @@ sendToAll(Client* clients, u32 nclients, ClientFD type, HeaderMessage* header, v
             assert(0);
         assert(nsend != -1);
         LoggingF("sendToAll|[%s]->"CLIENT_FMT" %d bytes\n", headerTypeString(header->type),
-                                                            CLIENT_ARG(clients[i]),
-                                                            nsend);
+                 CLIENT_ARG(clients[i]),
+                 nsend);
     }
 }
 
@@ -213,7 +214,7 @@ void
 disconnectAndNotify(Client* clients, u32 nclients, Client* client)
 {
     disconnect(client);
-
+    
     local_persist HeaderMessage header = HEADER_INIT(HEADER_TYPE_PRESENCE);
     header.id = client->id;
     PresenceMessage message = {.type = PRESENCE_TYPE_DISCONNECTED};
@@ -231,16 +232,16 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
 {
     s32 nrecv = 0;
     Client* client = 0;
-
+    
     LoggingF("authenticate (%d)|" HEADER_FMT "\n", pollfd->fd, HEADER_ARG(header));
-
+    
     /* Scenario 1: Search for existing client */
     if (header.type == HEADER_TYPE_ID)
     {
         IDMessage message;
         s32 nrecv = recv(pollfd->fd, &message, sizeof(message), 0);
         assert(nrecv == sizeof(message));
-
+        
         client = getClientByID((Client*)clientsArena->addr, nclients, message.id);
         if (!client)
         {
@@ -257,15 +258,15 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
             ErrorMessage error_message = ERROR_INIT(ERROR_TYPE_SUCCESS);
             sendAnyMessage(pollfd->fd, header, &error_message);
         }
-
+        
         if (!client->bifd)
             client->bifd = pollfd;
         else if (!client->unifd)
             client->unifd = pollfd;
         else
             assert(0);
-
-
+        
+        
         return client;
     }
     /* Scenario 2: Create a new client */
@@ -278,40 +279,40 @@ authenticate(Arena* clientsArena, s32 clients_file, struct pollfd* pollfd, Heade
             LoggingF("authenticate (%d)|err: %d/%lu bytes\n", pollfd->fd, nrecv, sizeof(message));
             return 0;
         }
-
+        
         // Copy metadata from IntroductionMessage
         client = ArenaPush(clientsArena, sizeof(*client));
         memcpy(client->author, message.author, AUTHOR_LEN);
         client->id = nclients;
-
+        
         if (!client->bifd)
             client->bifd = pollfd; 
         else if (!client->unifd)
             client->unifd = pollfd;
         else
             assert(0);
-
+        
         nclients++;
-
+        
 #ifdef IMPORT_ID
         write(clients_file, client, sizeof(*client));
 #endif
         LoggingF("authenticate (%d)|Added [%s](%lu)\n", pollfd->fd, client->author, client->id);
-
+        
         // Send ID to new client
         HeaderMessage header = HEADER_INIT(HEADER_TYPE_ID);
         IDMessage id_message;
         id_message.id = client->id;
-
+        
         s32 nsend = sendAnyMessage(pollfd->fd, header, &id_message);
         assert(nsend != -1);
-
+        
         return client;
     }
-
+    
     LoggingF("authenticate (%d)|Wrong header expected %s or %s\n", pollfd->fd,
-                                                                  headerTypeString(HEADER_TYPE_INTRODUCTION),
-                                                                  headerTypeString(HEADER_TYPE_ID));
+             headerTypeString(HEADER_TYPE_INTRODUCTION),
+             headerTypeString(HEADER_TYPE_ID));
     return 0;
 }
 
@@ -319,19 +320,19 @@ int
 main(int argc, char** argv)
 {
     signal(SIGPIPE, SIG_IGN);
-
+    
     LogFD = 2;
     // optional logging
     if (argc > 1)
     {
         if (*argv[1] == '-')
             if (argv[1][1] == 'l')
-            {
-                LogFD = open(LOGFILE, O_RDWR | O_CREAT | O_TRUNC, 0600);
-                assert(LogFD != -1);
-            }
+        {
+            LogFD = open(LOGFILE, O_RDWR | O_CREAT | O_TRUNC, 0600);
+            assert(LogFD != -1);
+        }
     }
-
+    
     s32 serverfd;
     // Start listening on the socket
     {
@@ -339,25 +340,25 @@ main(int argc, char** argv)
         u32 on = 1;
         serverfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         assert(serverfd > 2);
-
+        
         err = setsockopt(serverfd, SOL_SOCKET, SO_REUSEADDR, (u8*)&on, sizeof(on));
         assert(!err);
-
+        
         const struct sockaddr_in address = {
             AF_INET,
             htons(PORT),
             {0},
             {0},
         };
-
+        
         err = bind(serverfd, (const struct sockaddr*)&address, sizeof(address));
         assert(!err);
-
+        
         err = listen(serverfd, MAX_CONNECTIONS);
         assert(!err);
         LoggingF("Listening on :%d\n", PORT);
     }
-
+    
     Arena clientsArena;
     Arena fdsArena;
     Arena msgsArena;
@@ -366,7 +367,7 @@ main(int argc, char** argv)
     ArenaAlloc(&msgsArena, Megabytes(128)); // storing received messages
     struct pollfd* fds = fdsArena.addr;
     Client* clients = clientsArena.addr;
-
+    
     // Initializing fds
     struct pollfd* fdsAddr;
     struct pollfd newpollfd = {-1, POLLIN, 0}; // for copying with events already set
@@ -379,21 +380,21 @@ main(int argc, char** argv)
     fdsAddr = ArenaPush(&fdsArena, sizeof(*fds));
     memcpy(fdsAddr, &newpollfd, sizeof(*fds));
     newpollfd.fd = -1;
-
+    
     s32 clients_file;
 #ifdef IMPORT_ID
     clients_file = open(CLIENTS_FILE, O_RDWR | O_CREAT | O_APPEND, 0600);
     assert(clients_file != -1);
     struct stat statbuf;
     assert(fstat(clients_file, &statbuf) != -1);
-
+    
     read(clients_file, clients, statbuf.st_size);
     if (statbuf.st_size > 0)
     {
         ArenaPush(&clientsArena, statbuf.st_size);
         LoggingF("Imported %lu client(s)\n", statbuf.st_size / sizeof(*clients));
         nclients += statbuf.st_size / sizeof(*clients);
-
+        
         // Reset pointers on imported clients
         for (u32 i = 0; i < nclients - 1; i++)
         {
@@ -406,16 +407,16 @@ main(int argc, char** argv)
 #else
     clients_file = 0;
 #endif
-
+    
     // Initialize the rest of the fds array
     for (u32 i = FDS_CLIENTS; i < MAX_CONNECTIONS; i++)
         fds[i] = newpollfd;
-
+    
     while (1)
 	{
         s32 err = poll(fds, FDS_SIZE, TIMEOUT);
         assert(err != -1);
-
+        
         if (fds[FDS_STDIN].revents & POLLIN)
         {
             u8 c; // exit on ctrl-d
@@ -426,7 +427,7 @@ main(int argc, char** argv)
         {
             // TODO: what if we are not aligned by 2 anymore?
             s32 clientfd = accept(serverfd, 0, 0);
-
+            
             if (clientfd == -1)
             {
                 LoggingF("Error while accepting connection (%d)\n", clientfd);
@@ -434,7 +435,7 @@ main(int argc, char** argv)
             }
             else
                 LoggingF("New connection(%d)\n", clientfd);
-
+            
             // TODO: find empty space in arena (fragmentation)
             if (nclients + 1 == MAX_CONNECTIONS)
             {
@@ -453,13 +454,13 @@ main(int argc, char** argv)
                 LoggingF("Added pollfd(%d)\n", clientfd);
             }
         }
-
+        
         for (u32 conn = FDS_CLIENTS; conn < FDS_SIZE; conn++)
         {
             if (!(fds[conn].revents & POLLIN)) continue;
             if (fds[conn].fd == -1) continue;
             LoggingF("Message(%d)\n", fds[conn].fd);
-
+            
             // We received a message, try to parse the header
             HeaderMessage header;
             s32 nrecv = recv(fds[conn].fd, &header, sizeof(header), 0);
@@ -467,7 +468,7 @@ main(int argc, char** argv)
             {
                 LoggingF("Received error from fd: %d, errno: %d\n", fds[conn].fd, errno);
             };
-
+            
             Client* client;
             if (nrecv != sizeof(header))
             {
@@ -486,14 +487,14 @@ main(int argc, char** argv)
                 continue;
             }
             LoggingF("Received(%d): " HEADER_FMT "\n", fds[conn].fd, HEADER_ARG(header));
-
+            
             // Authentication
             if (!header.id)
             {
                 LoggingF("No client for connection(%d)\n", fds[conn].fd);
-
+                
                 client = authenticate(&clientsArena, clients_file, fds + conn, header);
-
+                
                 if (!client)
                 {
                     LoggingF("Could not initialize client (%d)\n", fds[conn].fd);
@@ -511,71 +512,71 @@ main(int argc, char** argv)
                 }
                 continue;
             }
-
+            
             client = getClientByID(clients, nclients, header.id);
             if (!client)
             {
                 LoggingF("No client for id %d\n", fds[conn].fd);
-
+                
                 header.type = HEADER_TYPE_ERROR;
                 ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
-
+                
                 sendAnyMessage(fds[conn].fd, header, &message);
-
+                
                 // Reject connection
                 fds[conn].fd = -1;
                 close(fds[conn].fd);
                 continue;
             }
-
+            
             switch (header.type) {
-            /* Send text message to all other clients */
-            case HEADER_TYPE_TEXT:
-            {
-                TextMessage* text_message = recvTextMessage(&msgsArena, fds[conn].fd);
-                LoggingF("Received(%d): ", fds[conn].fd);
-                printTextMessage(text_message, client, 0);
-
-                sendToOthers(clients, nclients, client, UNIFD, &header, text_message);
-            } break;
-            /* Send back client information */
-            case HEADER_TYPE_ID:
-            {
-                IDMessage id_message;
-                s32 nrecv = recv(fds[conn].fd, &id_message, sizeof(id_message), 0);
-                assert(nrecv == sizeof(id_message));
-
-                client = getClientByID(clients, nclients, id_message.id);
-                if (!client)
+                /* Send text message to all other clients */
+                case HEADER_TYPE_TEXT:
                 {
-                    header.type = HEADER_TYPE_ERROR;
-                    ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
-                    s32 nsend = sendAnyMessage(fds[conn].fd, header, &message);
-                    assert(nsend != -1);
-                    break;
-                }
-
-                HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
-                IntroductionMessage introduction_message;
-                header.id = client->id;
-                memcpy(introduction_message.author, client->author, AUTHOR_LEN);
-
-                nrecv = sendAnyMessage(fds[conn].fd, header, &introduction_message);
-                assert(nrecv != -1);
-            } break;
-            default:
+                    TextMessage* text_message = recvTextMessage(&msgsArena, fds[conn].fd);
+                    LoggingF("Received(%d): ", fds[conn].fd);
+                    printTextMessage(text_message, client, 0);
+                    
+                    sendToOthers(clients, nclients, client, UNIFD, &header, text_message);
+                } break;
+                /* Send back client information */
+                case HEADER_TYPE_ID:
+                {
+                    IDMessage id_message;
+                    s32 nrecv = recv(fds[conn].fd, &id_message, sizeof(id_message), 0);
+                    assert(nrecv == sizeof(id_message));
+                    
+                    client = getClientByID(clients, nclients, id_message.id);
+                    if (!client)
+                    {
+                        header.type = HEADER_TYPE_ERROR;
+                        ErrorMessage message = ERROR_INIT(ERROR_TYPE_NOTFOUND);
+                        s32 nsend = sendAnyMessage(fds[conn].fd, header, &message);
+                        assert(nsend != -1);
+                        break;
+                    }
+                    
+                    HeaderMessage header = HEADER_INIT(HEADER_TYPE_INTRODUCTION);
+                    IntroductionMessage introduction_message;
+                    header.id = client->id;
+                    memcpy(introduction_message.author, client->author, AUTHOR_LEN);
+                    
+                    nrecv = sendAnyMessage(fds[conn].fd, header, &introduction_message);
+                    assert(nrecv != -1);
+                } break;
+                default:
                 LoggingF("Unhandled '%s' from "CLIENT_FMT"(%d)\n", headerTypeString(header.type),
-                                                                   CLIENT_ARG((*client)),
-                                                                   fds[conn].fd);
+                         CLIENT_ARG((*client)),
+                         fds[conn].fd);
                 disconnectAndNotify(client, nclients, client);
                 continue;
             }
         }
     }
-
+    
 #ifdef IMPORT_ID
     close(clients_file);
 #endif
-
+    
     return 0;
 }
